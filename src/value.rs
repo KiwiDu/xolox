@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt,
-    ops::{Add, Div, Mul, Sub},
+    ops::{Add, Div, Mul, Not, Sub},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,13 +10,17 @@ pub enum Val {
     Num(f64),
     Bool(bool),
     Obj(HashMap<String, Val>),
+    Left(String),
+    Nil,
 }
 impl fmt::Display for Val {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Val::Str(s) => write!(f, "\"{}\"", s),
+            Val::Left(s) => write!(f, "{}", s),
             Val::Bool(b) => write!(f, "{}", b),
             Val::Num(n) => write!(f, "{}", n),
+            Val::Nil => write!(f, "nil"),
             Val::Obj(fields) => {
                 writeln!(f, "{{")?;
                 for (name, val) in fields {
@@ -24,6 +28,18 @@ impl fmt::Display for Val {
                 }
                 write!(f, "}}")
             }
+        }
+    }
+}
+impl Not for Val {
+    type Output = bool;
+
+    fn not(self) -> Self::Output {
+        use Val::*;
+        match self {
+            Str(s) => s.is_empty(),
+            Num(n) => n == 0.0,
+            _ => false,
         }
     }
 }

@@ -1,6 +1,10 @@
 use std::io::{self, Write};
 
-use xolox::{eval::Repl, lexer::Lexer, sexpr::Parser};
+use xolox::{
+    lexer::Lexer,
+    repl::{Repl, RuntimeError},
+    sexpr::Parser,
+};
 
 fn main() {
     let mut repl = Repl::from();
@@ -24,7 +28,11 @@ fn main() {
         println!("Expr: \n    {}", s);
 
         print!("    => ");
-        println!("{}", repl.exec(&s, false));
-        //println!("State: {:#?}", repl.state);
+        match repl.exec(&s) {
+            Ok(v) => println!("{}", v),
+            Err(RuntimeError(msg)) => println!("Runtime Error: {}", msg),
+        }
+
+        //println!("State: {:?}", repl.state);
     }
 }

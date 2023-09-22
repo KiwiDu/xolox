@@ -1,33 +1,14 @@
 use std::fmt;
 
 use crate::token::{Keywords, Stack, Token, TokenType};
-pub enum S<'a> {
+pub enum S {
     Atom(Token),
-    Unary(Token, &'a S<'a>),
-    Bin(Token, &'a S<'a>, &'a S<'a>),
-    Cons(Token, Vec<S<'a>>),
-}
-/* pub enum Op {
-    UnaryPlus,
-    UnaryMinus,
-    Plus,
-    Minus,
-    Mul,
-    Div,
+    Unary(Token, Box<S>),
+    Bin(Token, Box<S>, Box<S>),
+    Cons(Token, Vec<S>),
 }
 
-impl fmt::Display for Op {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Op::UnaryMinus | Op::Minus => write!(f, "-"),
-            Op::UnaryPlus | Op::Plus => write!(f, "+"),
-            Op::Div => write!(f, "/"),
-            Op::Mul => write!(f, "*"),
-        }
-    }
-} */
-
-impl fmt::Display for S<'_> {
+impl fmt::Display for S {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             S::Atom(i) => write!(f, "{}", i),
@@ -38,8 +19,8 @@ impl fmt::Display for S<'_> {
                 }
                 write!(f, ")")
             }
-            S::Unary(_, _) => todo!(),
-            S::Bin(_, _, _) => todo!(),
+            S::Unary(head, operand) => write!(f, "({} {})", head, operand),
+            S::Bin(head, left, right) => write!(f, "({} {} {})", head, left, right),
         }
     }
 }
@@ -86,6 +67,18 @@ impl Parser {
                 TokenType::Semicolon,
                 "Unfinished stmt!",
             ),
+            Kwd(Keywords::Var) => {
+                self.next();
+                if let S::Bin(Op(TokenType::Equal), l, r) = self.expect_after(
+                    &mut Self::parse_expr,
+                    TokenType::Semicolon,
+                    "Unfinished stmt!",
+                ) {
+                    S::Bin(token, l, r)
+                } else {
+                    panic!("Expected an assignment statment!")
+                }
+            }
             Kwd(_) => todo!(),
 
             NoOp => panic!("Unexpected NoOp!"),
@@ -114,7 +107,7 @@ impl Parser {
             Op(t) => {
                 let (_, r) = prefix_power(t);
                 let right = self.expr(r, level + 1);
-                S::Cons(token, vec![right])
+                S::Unary(token, Box::new(right))
             }
             Num(_) | Idt(_) | Str(_) | Kwd(True) | Kwd(False) => S::Atom(token),
             EOF => panic!("Unexpected End of File!"),
@@ -132,7 +125,7 @@ impl Parser {
                     break;
                 }
                 self.stack.pop();
-                left = S::Cons(Op(t), vec![left]);
+                left = S::Unary(Op(t), Box::new(left));
                 //println!("{}cons:\t{}", indent, left);
             } else if let Some((l, r)) = infix_power(t) {
                 if l < power {
@@ -141,7 +134,7 @@ impl Parser {
                 }
                 self.stack.pop(); // if the op is strong enough, pop
                 let right = self.expr(r, level + 1);
-                left = S::Cons(Op(t), vec![left, right]);
+                left = S::Bin(Op(t), Box::new(left), Box::new(right));
                 //println!("{}cons:\t{}", indent, left);
             } else {
                 //println!("{}Break from expr!", indent); //No suitable operator found
