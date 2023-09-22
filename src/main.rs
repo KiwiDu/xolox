@@ -1,8 +1,9 @@
 use std::io::{self, Write};
 
-use xolox::{lexer::Lexer, sexpr::Parser};
+use xolox::{eval::Repl, lexer::Lexer, sexpr::Parser};
 
 fn main() {
+    let mut repl = Repl::from();
     loop {
         print!(">> ");
         io::stdout().flush().unwrap();
@@ -12,13 +13,18 @@ fn main() {
             return;
         }
         let mut lexer = Lexer::from(&ln);
-        print!("Tokens: ");
+        //print!("Tokens: ");
         let tokens = lexer.scan_tokens();
-        for token in &tokens {
+        /* for token in &tokens {
             print!("{:?} ", token);
-        }
-        println!("");
+        } */
+        //println!("");
         let mut parser = Parser::from(&tokens);
-        println!("Expr: \n\t{}", parser.parse_stmt());
+        let s = parser.parse_stmt();
+        println!("Expr: \n    {}", s);
+
+        print!("    => ");
+        println!("{}", repl.exec(&s, false));
+        //println!("State: {:#?}", repl.state);
     }
 }

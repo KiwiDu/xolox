@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    ops::{Add, Div, Mul, Sub},
+};
 
 pub trait Stack {
     type Item;
@@ -104,6 +107,56 @@ impl fmt::Display for Token {
             Token::Num(num) => write!(f, "{}", num),
             Token::NoOp => write!(f, ""),
             Token::EOF => write!(f, ""),
+        }
+    }
+}
+
+impl Add for Token {
+    type Output = Token;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        use Token::*;
+        match (self, rhs) {
+            (Str(a), Str(b)) => Str(a + &b),
+            (Num(a), Num(b)) => Num(a + b),
+            (a, b) => panic!("Invalid operation add for '{}' and '{}'!", a, b),
+        }
+    }
+}
+
+impl Sub for Token {
+    type Output = Token;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        use Token::*;
+        match (self, rhs) {
+            (Num(a), Num(b)) => Num(a - b),
+            (a, b) => panic!("Invalid operation sub for '{}' and '{}'!", a, b),
+        }
+    }
+}
+
+impl Mul for Token {
+    type Output = Token;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        use Token::*;
+        match (self, rhs) {
+            (Num(a), Num(b)) => Num(a * b),
+            (Str(a), Num(b)) => Str(a.repeat(b as usize)),
+            (a, b) => panic!("Invalid operation mul for '{}' and '{}'!", a, b),
+        }
+    }
+}
+
+impl Div for Token {
+    type Output = Token;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        use Token::*;
+        match (self, rhs) {
+            (Num(a), Num(b)) => Num(a / b),
+            (a, b) => panic!("Invalid operation div for '{}' and '{}'!", a, b),
         }
     }
 }

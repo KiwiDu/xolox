@@ -1,9 +1,11 @@
 use std::fmt;
 
-use crate::token::{Stack, Token, TokenType};
-pub enum S {
+use crate::token::{Keywords, Stack, Token, TokenType};
+pub enum S<'a> {
     Atom(Token),
-    Cons(Token, Vec<S>),
+    Unary(Token, &'a S<'a>),
+    Bin(Token, &'a S<'a>, &'a S<'a>),
+    Cons(Token, Vec<S<'a>>),
 }
 /* pub enum Op {
     UnaryPlus,
@@ -25,7 +27,7 @@ impl fmt::Display for Op {
     }
 } */
 
-impl fmt::Display for S {
+impl fmt::Display for S<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             S::Atom(i) => write!(f, "{}", i),
@@ -36,6 +38,8 @@ impl fmt::Display for S {
                 }
                 write!(f, ")")
             }
+            S::Unary(_, _) => todo!(),
+            S::Bin(_, _, _) => todo!(),
         }
     }
 }
@@ -96,6 +100,7 @@ impl Parser {
     fn expr(&mut self, power: u8, level: usize) -> S {
         //let indent = "    ".repeat(level);
         //println!("{}Stack: {:?}", indent, self.stack);
+        use Keywords::*;
         use Token::*;
         let token = self.next();
         let mut left = match token {
@@ -111,7 +116,7 @@ impl Parser {
                 let right = self.expr(r, level + 1);
                 S::Cons(token, vec![right])
             }
-            Num(_) | Idt(_) | Str(_) => S::Atom(token),
+            Num(_) | Idt(_) | Str(_) | Kwd(True) | Kwd(False) => S::Atom(token),
             EOF => panic!("Unexpected End of File!"),
             _ => panic!(
                 "Bad token! Got '{:#?}', expected a prefix or an expr!",
