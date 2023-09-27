@@ -31,16 +31,24 @@ impl fmt::Display for Val {
         }
     }
 }
+
+impl Into<bool> for Val {
+    fn into(self) -> bool {
+        use Val::*;
+        match self {
+            Str(s) => !s.is_empty(),
+            Num(n) => n.is_normal(),
+            Bool(b) => b,
+            _ => false,
+        }
+    }
+}
 impl Not for Val {
     type Output = bool;
 
     fn not(self) -> Self::Output {
-        use Val::*;
-        match self {
-            Str(s) => s.is_empty(),
-            Num(n) => n == 0.0,
-            _ => false,
-        }
+        let b: bool = self.into();
+        !b
     }
 }
 impl Add for Val {

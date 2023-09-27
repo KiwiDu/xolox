@@ -1,10 +1,6 @@
 use std::io::{self, Write};
 
-use xolox::{
-    lexer::Lexer,
-    repl::{Repl, RuntimeError},
-    sexpr::Parser,
-};
+use xolox::{error::Error, lexer::Lexer, parse::Parser, repl::Repl};
 
 fn main() {
     let mut repl = Repl::from();
@@ -23,16 +19,17 @@ fn main() {
             print!("{:?} ", token);
         } */
         //println!("");
-        let mut parser = Parser::from(&tokens);
+        let mut parser = Parser::from(tokens);
         let s = parser.parse_stmt();
-        println!("Expr: \n    {}", s);
+        println!("Expr: {}", s);
 
-        print!("    => ");
+        print!("   => ");
         match repl.exec(&s) {
             Ok(v) => println!("{}", v),
-            Err(RuntimeError(msg)) => println!("Runtime Error: {}", msg),
+            Err(Error::RuntimeError(msg)) => println!("Runtime Error: {}", msg),
+            Err(Error::SyntaxError(msg)) => println!("Syntax Error: {}", msg),
         }
 
-        //println!("State: {:?}", repl.state);
+        //println!("State: {:?}", repl.env);
     }
 }
