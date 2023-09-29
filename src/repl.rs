@@ -43,7 +43,7 @@ impl Repl {
 }
 
 impl Repl {
-    pub fn from() -> Self {
+    pub fn new() -> Self {
         Self {
             env: vec![HashMap::new()],
         }

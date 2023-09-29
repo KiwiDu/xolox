@@ -1,24 +1,9 @@
-use std::io::{self, Write};
-
-use xolox::{error::Error, lexer::Lexer, parse::Parser, repl::Repl};
+use xolox::{error::Error, from_stdin, parse::Parser, repl::Repl};
 
 fn main() {
-    let mut repl = Repl::from();
+    let mut repl = Repl::new();
     loop {
-        print!(">> ");
-        io::stdout().flush().unwrap();
-        let mut ln = String::new();
-        io::stdin().read_line(&mut ln).unwrap();
-        if ln.trim() == "quit" {
-            return;
-        }
-        let mut lexer = Lexer::from(&ln);
-        //print!("Tokens: ");
-        let tokens = lexer.scan_tokens();
-        /* for token in &tokens {
-            print!("{:?} ", token);
-        } */
-        //println!("");
+        let tokens = from_stdin().unwrap();
         let mut parser = Parser::from(tokens);
         let s = parser.parse_stmt();
         println!("Expr: {}", s);
