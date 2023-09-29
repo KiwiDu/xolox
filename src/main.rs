@@ -6,10 +6,11 @@ fn main() {
         let tokens = from_stdin().unwrap();
         let mut parser = Parser::from(tokens);
         let s = parser.parse_stmt();
-        println!("Expr: {}", s);
 
+        let result = repl.exec(&s);
+        println!("Expr: {}", s);
         print!("   => ");
-        match repl.exec(&s) {
+        match result {
             Ok(v) => println!("{}", v),
             Err(Error::RuntimeError(msg)) => println!("Runtime Error: {}", msg),
             Err(Error::SyntaxError(msg)) => println!("Syntax Error: {}", msg),

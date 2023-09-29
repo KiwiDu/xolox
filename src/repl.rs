@@ -21,6 +21,7 @@ fn rt_err(s: &str) -> Result {
 
 pub struct Repl {
     pub env: Vec<HashMap<String, Val>>,
+    pub out: Vec<String>,
 }
 
 impl Repl {
@@ -46,6 +47,7 @@ impl Repl {
     pub fn new() -> Self {
         Self {
             env: vec![HashMap::new()],
+            out: vec![],
         }
     }
 
@@ -75,7 +77,8 @@ impl Repl {
             Plus => oprand,
             Minus => Val::Num(0.0) - oprand,
             Bang => Val::Bool(!oprand),
-            _ => return rt_err(""),
+            Semicolon => Val::Nil,
+            _ => return rt_err(format!("Unexpected unary operator: {}!", tt).as_str()),
         })
     }
 
@@ -100,7 +103,11 @@ impl Repl {
     }
 
     pub fn exec(&mut self, s: &S) -> Result {
-        self.eval(s, V::R)
+        let result = self.eval(s, V::R);
+        for s in std::mem::replace(&mut self.out, Vec::new()) {
+            println!("{}", s);
+        }
+        result
     }
 
     fn eval(&mut self, s: &S, v: V) -> Result {
@@ -112,7 +119,11 @@ impl Repl {
                 let oprand = self.eval(s, v)?;
                 self.unary(tt, oprand, v)
             }
-            S::Unary(_, _) => rt_err("Invalid Syntax!"),
+            S::Unary(Token::Kwd(Keywords::Print), e) => {
+                let s = format!("{}", self.eval(e, V::R)?);
+                self.out.push(s);
+                Ok(Val::Nil)
+            }
             S::Bin(Op(TokenType::Equal), left, right) => {
                 let l = self.eval(&left, V::L)?;
 
@@ -153,6 +164,26 @@ impl Repl {
                     } else {
                         self.exec(elsedo)
                     }
+                }
+                _ => rt_err("Invalid If clause!"),
+            },
+            S::Cons(Kwd(Keywords::While), args) => match &args[..] {
+                [cond, loopdo] => {
+                    while self.eval(cond, V::R)?.into() {
+                        self.exec(loopdo)?;
+                    }
+                    Ok(Val::Nil)
+                }
+                _ => rt_err("Invalid If clause!"),
+            },
+            S::Cons(Kwd(Keywords::For), args) => match &args[..] {
+                [init, cond, end, loopdo] => {
+                    self.exec(init)?;
+                    while self.eval(cond, V::R)?.into() {
+                        self.exec(loopdo)?;
+                        self.exec(end)?;
+                    }
+                    Ok(Val::Nil)
                 }
                 _ => rt_err("Invalid If clause!"),
             },

@@ -17,47 +17,44 @@ use token::Token;
 
 type TokenStack = VecDeque<Token>;
 
-fn print(s: &str) {
-    print!("{}", s);
+pub fn scan_ln(promt: &'static str, stack: &mut Vec<u8>) -> Option<TokenStack> {
+    print!("{}", promt);
     io::stdout().flush().unwrap();
-}
-
-pub fn scan_ln() -> Option<TokenStack> {
     let mut ln = String::new();
     io::stdin().read_line(&mut ln).unwrap();
     if ln.trim() == "quit" {
         return None;
     }
-    Some(Lexer::from(&ln).scan())
+    let tokens = Lexer::from(&ln).scan();
+    stack_check(&tokens, stack);
+    Some(tokens)
+}
+
+fn stack_check(ln: &TokenStack, stack: &mut Vec<u8>) {
+    ln.iter().for_each(|t| match t.to_string().as_str() {
+        "{" => stack.push(b'{'),
+        "}" => match stack.last() {
+            Some(b'{') => {
+                stack.pop();
+            }
+            _ => panic!("Unmatched brackets!"),
+        },
+        "(" => stack.push(b'('),
+        ")" => match stack.last() {
+            Some(b'(') => {
+                stack.pop();
+            }
+            _ => panic!("Unmatched parentheses!"),
+        },
+        _ => (),
+    })
 }
 
 pub fn from_stdin() -> Option<TokenStack> {
-    print(">> ");
-    let mut stack = Vec::new();
-    let mut tokens = scan_ln()?;
-    loop {
-        match tokens.back()?.to_string().as_str() {
-            "{" => stack.push('{'),
-            "}" => match stack.last() {
-                Some('{') => {
-                    stack.pop();
-                }
-                _ => panic!("Unmatched brackets!"),
-            },
-            "(" => stack.push('('),
-            ")" => match stack.last() {
-                Some('(') => {
-                    stack.pop();
-                }
-                _ => panic!("Unmatched parentheses!"),
-            },
-            _ => (),
-        }
-        if stack.is_empty() {
-            break;
-        }
-        print(".. ");
-        let mut cont = scan_ln()?;
+    let mut stack: Vec<u8> = Vec::new();
+    let mut tokens = scan_ln(">> ", &mut stack)?;
+    while !stack.is_empty() {
+        let mut cont = scan_ln(".. ", &mut stack)?;
         tokens.append(&mut cont);
     }
     Some(tokens)

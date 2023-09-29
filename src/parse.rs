@@ -52,21 +52,39 @@ impl Parser {
                 self.next();
                 S::Cons(token, stmts)
             }
-            Op(_) | Idt(_) | Str(_) | Num(_) => self.expect_after(
-                &mut Self::parse_expr,
-                TokenType::Semicolon,
-                "Unfinished stmt!",
-            ),
+            Op(_) | Idt(_) | Str(_) | Num(_) => {
+                let e = self.parse_expr();
+                if matches!(self.peek(), Some(Op(TokenType::Semicolon))) {
+                    self.next();
+                    S::Unary(Op(TokenType::Semicolon), Box::new(e))
+                } else {
+                    e
+                }
+            }
+            Kwd(Keywords::Print) => {
+                self.next();
+                S::Unary(
+                    token,
+                    Box::new(self.expect_after(
+                        &mut Self::parse_expr,
+                        TokenType::Semicolon,
+                        "Unfinished stmt!",
+                    )),
+                )
+            }
             Kwd(Keywords::Var) => {
                 self.next();
-                if let S::Bin(Op(TokenType::Equal), l, r) = self.expect_after(
+                //let name = self.parse_expr();
+                match self.expect_after(
                     &mut Self::parse_expr,
                     TokenType::Semicolon,
                     "Unfinished stmt!",
                 ) {
-                    S::Bin(token, l, r)
-                } else {
-                    panic!("Expected an assignment statment!")
+                    S::Bin(Op(TokenType::Equal), l, r) => S::Bin(token, l, r),
+                    name @ S::Atom(Idt(_)) => {
+                        S::Bin(token, Box::new(name), Box::new(S::Atom(Token::NoOp)))
+                    }
+                    _ => panic!("Expected an assignment statment!"),
                 }
             }
             Kwd(Keywords::If) => {
@@ -79,6 +97,26 @@ impl Parser {
                 };
 
                 S::Cons(token, vec![cond, thendo, elsedo])
+            }
+            Kwd(Keywords::While) => {
+                self.next();
+                let cond = self.parse_expr();
+                let loopdo = self.parse_stmt();
+
+                S::Cons(token, vec![cond, loopdo])
+            }
+            Kwd(Keywords::For) => {
+                self.next();
+                let init = self.parse_stmt();
+                let cond = self.expect_after(
+                    &mut Self::parse_expr,
+                    TokenType::Semicolon,
+                    "Expected semicolon as delimiter!",
+                );
+                let end = self.parse_expr();
+                let loopdo = self.parse_stmt();
+
+                S::Cons(token, vec![init, cond, end, loopdo])
             }
             Kwd(_) => todo!(),
 
@@ -158,7 +196,7 @@ fn prefix_power(t: TokenType) -> ((), u8) {
 fn infix_power(t: TokenType) -> Option<(u8, u8)> {
     use TokenType::*;
     Some(match t {
-        Equal => (1, 2),
+        Equal => (2, 1),
         Greater | GreaterEqual | Less | LessEqual => (3, 4),
         BangEqual | EqualEqual => (5, 6),
         Minus | Plus => (7, 8),
