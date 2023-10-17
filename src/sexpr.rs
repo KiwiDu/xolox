@@ -1,14 +1,16 @@
-use std::fmt;
+use core::fmt;
 
 use crate::token::Token;
-pub enum S {
-    Atom(Token),
-    Unary(Token, Box<S>),
-    Bin(Token, Box<S>, Box<S>),
-    Cons(Token, Vec<S>),
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum S<T> {
+    Atom(T),
+    Unary(T, Box<Self>),
+    Bin(T, Box<Self>, Box<Self>),
+    Cons(T, Vec<Self>),
 }
 
-impl fmt::Display for S {
+impl fmt::Display for S<Token> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             S::Atom(i) => write!(f, "{}", i),

@@ -1,11 +1,3 @@
-pub mod error;
-pub mod lexer;
-pub mod parse;
-pub mod repl;
-pub mod sexpr;
-pub mod token;
-pub mod value;
-
 use std::{
     collections::VecDeque,
     fs,
@@ -64,3 +56,11 @@ pub fn from_file(path: &str) -> Option<TokenStack> {
     let f = fs::read_to_string(path).ok()?;
     Some(Lexer::from(&f).scan())
 }
+
+pub mod error;
+pub mod lexer;
+pub mod parse;
+pub mod repl;
+pub mod sexpr;
+pub mod token;
+pub mod value;

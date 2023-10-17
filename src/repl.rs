@@ -53,7 +53,7 @@ impl Repl {
 
     fn atom(&mut self, t: Token, v: V) -> Result {
         match (v, t) {
-            (V::L, Token::Idt(id)) => Ok(Val::Left(id)),
+            (V::L, Token::Idt(id)) => Ok(Val::Var(id)),
             (V::L, _) => rt_err("Expected a left value to assign to."),
             (V::R, Token::Idt(id)) => self
                 .get(id)
@@ -102,7 +102,7 @@ impl Repl {
         })
     }
 
-    pub fn exec(&mut self, s: &S) -> Result {
+    pub fn exec(&mut self, s: &S<Token>) -> Result {
         let result = self.eval(s, V::R);
         for s in std::mem::replace(&mut self.out, Vec::new()) {
             println!("{}", s);
@@ -110,7 +110,7 @@ impl Repl {
         result
     }
 
-    fn eval(&mut self, s: &S, v: V) -> Result {
+    fn eval(&mut self, s: &S<Token>, v: V) -> Result {
         use Token::*;
         //println!("{}", sexpr);
         match s {
@@ -127,7 +127,7 @@ impl Repl {
             S::Bin(Op(TokenType::Equal), left, right) => {
                 let l = self.eval(&left, V::L)?;
 
-                if let Val::Left(name) = l {
+                if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
                     self.assign(name, r.clone(), false).ok_or_else(|| {
                         Error::RuntimeError(String::from(
@@ -138,10 +138,26 @@ impl Repl {
                     rt_err("Expected a left value to assign to.")
                 }
             }
+            S::Cons(Kwd(Keywords::Fun), tail) => match &tail[..] {
+                [S::Atom(Idt(name)), ref args @ .., body] => {
+                    let args: Vec<_> = args
+                        .iter()
+                        .map(|x| match x {
+                            S::Atom(Idt(name)) => name,
+                            _ => panic!("Invalid function declaration!"), //TODO: How to get rid of it?
+                        })
+                        .cloned()
+                        .collect();
+                    let func = Val::Fun(name.to_string(), args, body.clone());
+                    self.assign(name.to_string(), func.clone(), true);
+                    Ok(func)
+                }
+                _ => rt_err("Expected a valid function declaration."),
+            },
             S::Bin(Kwd(Keywords::Var), left, right) => {
                 let l = self.eval(&left, V::L)?;
 
-                if let Val::Left(name) = l {
+                if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
                     self.assign(name, r.clone(), true);
                     Ok(r)
