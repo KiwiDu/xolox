@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::zip};
 
 use crate::{
     error::Error,
@@ -25,21 +25,29 @@ pub struct Repl {
 }
 
 impl Repl {
-    fn assign(&mut self, name: String, v: Val, init: bool) -> Option<Val> {
+    fn assign(&mut self, name: &str, v: Val, init: bool) -> Option<Val> {
         let frame = self.env.last_mut().unwrap();
-        if init || frame.contains_key(&name) {
-            frame.insert(name, v)
+        if init || frame.contains_key(name) {
+            frame.insert(name.to_owned(), v)
         } else {
             None
         }
     }
-    fn get(&mut self, name: String) -> Option<Val> {
+    fn get(&mut self, name: &str) -> Option<Val> {
         for frame in self.env.iter_mut().rev() {
-            if frame.contains_key(&name) {
-                return frame.get(&name).cloned();
+            if frame.contains_key(name) {
+                return frame.get(name).cloned();
             }
         }
         None
+    }
+    fn fork(&mut self) {
+        self.env.push(HashMap::new());
+    }
+    fn unfork(&mut self) {
+        if self.env.len() >= 1 {
+            self.env.pop();
+        }
     }
 }
 
@@ -56,7 +64,7 @@ impl Repl {
             (V::L, Token::Idt(id)) => Ok(Val::Var(id)),
             (V::L, _) => rt_err("Expected a left value to assign to."),
             (V::R, Token::Idt(id)) => self
-                .get(id)
+                .get(&id)
                 .ok_or_else(|| Error::RuntimeError(String::from("Variable not found."))), // Retrieve from the state
             (V::R, Token::Kwd(Keywords::True)) => Ok(Val::Bool(true)),
             (V::R, Token::Kwd(Keywords::False)) => Ok(Val::Bool(false)),
@@ -129,7 +137,7 @@ impl Repl {
 
                 if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
-                    self.assign(name, r.clone(), false).ok_or_else(|| {
+                    self.assign(&name, r.clone(), false).ok_or_else(|| {
                         Error::RuntimeError(String::from(
                             "Variable not found. Declare it first before assignment.",
                         ))
@@ -149,17 +157,34 @@ impl Repl {
                         .cloned()
                         .collect();
                     let func = Val::Fun(name.to_string(), args, body.clone());
-                    self.assign(name.to_string(), func.clone(), true);
+                    self.assign(name, func.clone(), true);
                     Ok(func)
                 }
                 _ => rt_err("Expected a valid function declaration."),
+            },
+            S::Cons(Idt(name), tail) => match self.get(name) {
+                Some(Val::Fun(_, args, body)) => {
+                    if args.len() != tail.len() {
+                        return rt_err("Arity does not match!");
+                    }
+                    self.fork();
+                    for (arg, para) in zip(args, tail) {
+                        let v = self.eval(para, V::R)?;
+                        self.assign(&arg, v, true);
+                    }
+                    let e = self.exec(&body);
+                    self.unfork();
+                    e
+                }
+                Some(_) => rt_err("Object not callable!"),
+                _ => rt_err("Function does not exist!"),
             },
             S::Bin(Kwd(Keywords::Var), left, right) => {
                 let l = self.eval(&left, V::L)?;
 
                 if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
-                    self.assign(name, r.clone(), true);
+                    self.assign(&name, r.clone(), true);
                     Ok(r)
                 } else {
                     rt_err("Expected a left value to assign to.")

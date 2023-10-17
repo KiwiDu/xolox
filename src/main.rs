@@ -7,9 +7,9 @@ fn main() {
         let mut parser = Parser::from(tokens);
         let s = parser.parse_stmt();
         println!("Expr: {}", s);
-        print!("   => ");
-        let result = repl.exec(&s);
 
+        let result = repl.exec(&s);
+        print!("   => ");
         match result {
             Ok(v) => println!("{}", v),
             Err(Error::RuntimeError(msg)) => println!("Runtime Error: {}", msg),
