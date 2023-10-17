@@ -12,6 +12,10 @@ pub struct Parser {
 
 type Result = core::result::Result<S<Token>, Error>;
 
+fn stx_err(s: &str) -> Result {
+    Err(Error::SyntaxError(s.to_owned()))
+}
+
 macro_rules! expect_to_match {
     ($p:pat) => {
         if matches!(self.peek()?, p) {
@@ -40,21 +44,21 @@ impl Parser {
         self.next()
     }
 
-    fn expect_after<T>(
+    fn expect_after(
         &mut self,
-        f: &mut dyn FnMut(&mut Self) -> T,
+        f: &mut dyn FnMut(&mut Self) -> S<Token>,
         expected: TokenType,
         msg: &str,
-    ) -> T {
+    ) -> Result {
         let r = f(self);
         match self.next() {
             Some(Token::Op(t)) if t == expected => (),
-            _ => panic!("{}", msg),
+            _ => return stx_err(msg),
         }
-        r
+        Ok(r)
     }
 
-    fn parse_group(&mut self) -> Vec<S<Token>> {
+    fn parse_paren_inner(&mut self) -> Vec<S<Token>> {
         let mut args = Vec::new();
         if self.peek() != Some(Token::from(")")) {
             loop {
@@ -68,16 +72,20 @@ impl Parser {
         args
     }
 
-    pub fn parse_stmt(&mut self) -> S<Token> {
+    pub fn eof(&self) -> bool {
+        return self.stack.is_empty();
+    }
+
+    pub fn parse_stmt(&mut self) -> Result {
         use Token::*;
         let token = self.peek().clone().unwrap_or(EOF);
-        match token {
+        Ok(match token {
             //Block stmt
             Op(TokenType::LeftBrace) => {
                 self.next();
                 let mut stmts = Vec::new();
                 while self.peek() != Some(Op(TokenType::RightBrace)) {
-                    stmts.push(self.parse_stmt());
+                    stmts.push(self.parse_stmt()?);
                 }
                 self.next();
                 S::Cons(token, stmts)
@@ -104,7 +112,15 @@ impl Parser {
                     //Function call
                     Some(Op(TokenType::LeftParen)) => {
                         self.next();
-                        S::Cons(ident, self.parse_group())
+                        let r = S::Cons(ident, self.parse_paren_inner());
+                        if self.next() != Some(Token::from(")")) {
+                            return stx_err("Unfinished function declaration!");
+                        }
+                        if self.peek() == Some(Token::from(";")) {
+                            self.next();
+                            return Ok(S::Unary(Op(TokenType::Semicolon), Box::new(r)));
+                        }
+                        r
                     }
                     //Expr
                     None => e,
@@ -120,7 +136,7 @@ impl Parser {
                         &mut Self::parse_expr,
                         TokenType::Semicolon,
                         "Unfinished stmt!",
-                    )),
+                    )?),
                 )
             }
             //Declaration stmts w. optional assignment
@@ -130,12 +146,12 @@ impl Parser {
                     &mut Self::parse_expr,
                     TokenType::Semicolon,
                     "Unfinished stmt!",
-                ) {
+                )? {
                     S::Bin(Op(TokenType::Equal), l, r) => S::Bin(token, l, r),
                     name @ S::Atom(Idt(_)) => {
                         S::Bin(token, Box::new(name), Box::new(S::Atom(Token::NoOp)))
                     }
-                    _ => panic!("Expected an assignment statment!"),
+                    _ => return stx_err("Expected an assignment statment!"),
                 }
             }
             Kwd(Keywords::Fun) => {
@@ -145,26 +161,26 @@ impl Parser {
                     &mut Self::parse_expr,
                     "(".into(),
                     "Expect left paren to introduce arguments!",
-                ) {
+                )? {
                     idt @ S::Atom(Idt(_)) => idt,
-                    _ => panic!("Expected a valid identifier to name a new function!"),
+                    _ => return stx_err("Expected a valid identifier to name a new function!"),
                 };
 
                 let mut args = vec![name];
-                args.extend(self.parse_group());
+                args.extend(self.parse_paren_inner());
                 if self.next() != Some(Token::from(")")) {
-                    panic!("Unfinished function declaration!");
+                    return stx_err("Unfinished function declaration!");
                 }
-                args.push(self.parse_stmt());
+                args.push(self.parse_stmt()?);
                 S::Cons(token, args)
             }
             //If stmt and else caluse
             Kwd(Keywords::If) => {
                 self.next();
                 let cond = self.parse_expr();
-                let thendo = self.parse_stmt();
+                let thendo = self.parse_stmt()?;
                 let elsedo = match self.next_if(Kwd(Keywords::Else)) {
-                    Some(_) => self.parse_stmt(),
+                    Some(_) => self.parse_stmt()?,
                     None => S::Atom(Token::NoOp),
                 };
 
@@ -174,29 +190,29 @@ impl Parser {
             Kwd(Keywords::While) => {
                 self.next();
                 let cond = self.parse_expr();
-                let loopdo = self.parse_stmt();
+                let loopdo = self.parse_stmt()?;
 
                 S::Cons(token, vec![cond, loopdo])
             }
             Kwd(Keywords::For) => {
                 self.next();
-                let init = self.parse_stmt();
+                let init = self.parse_stmt()?;
                 let cond = self.expect_after(
                     &mut Self::parse_expr,
                     TokenType::Semicolon,
                     "Expected semicolon as delimiter!",
-                );
+                )?;
                 let end = self.parse_expr();
-                let loopdo = self.parse_stmt();
+                let loopdo = self.parse_stmt()?;
 
                 S::Cons(token, vec![init, cond, end, loopdo])
             }
 
             Kwd(_) => todo!(),
 
-            NoOp => panic!("Unexpected NoOp!"),
-            EOF => panic!("Unexpected EOF!"),
-        }
+            NoOp => return stx_err("Unexpected NoOp!"),
+            EOF => return stx_err("Unexpected EOF!"),
+        })
     }
 
     pub fn parse_expr(&mut self) -> S<Token> {
