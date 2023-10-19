@@ -80,6 +80,13 @@ impl Parser {
 
                 S::Cons(token, vec![cond, thendo, elsedo])
             }
+            Kwd(Keywords::While) => {
+                self.next();
+                let cond = self.parse_expr();
+                let loopdo = self.parse_stmt();
+
+                S::Cons(token, vec![cond, loopdo])
+            }
             Kwd(_) => todo!(),
 
             NoOp => panic!("Unexpected NoOp!"),
@@ -158,7 +165,7 @@ fn prefix_power(t: TokenType) -> ((), u8) {
 fn infix_power(t: TokenType) -> Option<(u8, u8)> {
     use TokenType::*;
     Some(match t {
-        Equal => (1, 2),
+        Equal => (2, 1),
         Greater | GreaterEqual | Less | LessEqual => (3, 4),
         BangEqual | EqualEqual => (5, 6),
         Minus | Plus => (7, 8),

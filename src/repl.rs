@@ -156,6 +156,16 @@ impl Repl {
                 }
                 _ => rt_err("Invalid If clause!"),
             },
+            S::Cons(Kwd(Keywords::While), args) => match &args[..] {
+                [cond, loopdo] => {
+                    let mut ret = Val::Nil;
+                    while self.eval(cond, V::R)?.into() {
+                        ret = self.exec(loopdo)?
+                    }
+                    Ok(ret)
+                }
+                _ => rt_err("Invalid If clause!"),
+            },
             _ => todo!(),
         }
     }
