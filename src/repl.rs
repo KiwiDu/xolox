@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::zip};
 
 use crate::{
     error::Error,
@@ -21,40 +21,50 @@ fn rt_err(s: &str) -> Result {
 
 pub struct Repl {
     pub env: Vec<HashMap<String, Val>>,
+    pub out: Vec<String>,
 }
 
 impl Repl {
-    fn assign(&mut self, name: String, v: Val, init: bool) -> Option<Val> {
+    fn assign(&mut self, name: &str, v: Val, init: bool) -> Option<Val> {
         let frame = self.env.last_mut().unwrap();
-        if init || frame.contains_key(&name) {
-            frame.insert(name, v)
+        if init || frame.contains_key(name) {
+            frame.insert(name.to_owned(), v)
         } else {
             None
         }
     }
-    fn get(&mut self, name: String) -> Option<Val> {
+    fn get(&mut self, name: &str) -> Option<Val> {
         for frame in self.env.iter_mut().rev() {
-            if frame.contains_key(&name) {
-                return frame.get(&name).cloned();
+            if frame.contains_key(name) {
+                return frame.get(name).cloned();
             }
         }
         None
     }
+    fn fork(&mut self) {
+        self.env.push(HashMap::new());
+    }
+    fn unfork(&mut self) {
+        if self.env.len() >= 1 {
+            self.env.pop();
+        }
+    }
 }
 
 impl Repl {
-    pub fn from() -> Self {
+    pub fn new() -> Self {
         Self {
             env: vec![HashMap::new()],
+            out: vec![],
         }
     }
 
     fn atom(&mut self, t: Token, v: V) -> Result {
         match (v, t) {
-            (V::L, Token::Idt(id)) => Ok(Val::Left(id)),
+            (V::L, Token::Idt(id)) => Ok(Val::Var(id)),
             (V::L, _) => rt_err("Expected a left value to assign to."),
             (V::R, Token::Idt(id)) => self
-                .get(id)
+                .get(&id)
                 .ok_or_else(|| Error::RuntimeError(String::from("Variable not found."))), // Retrieve from the state
             (V::R, Token::Kwd(Keywords::True)) => Ok(Val::Bool(true)),
             (V::R, Token::Kwd(Keywords::False)) => Ok(Val::Bool(false)),
@@ -75,7 +85,8 @@ impl Repl {
             Plus => oprand,
             Minus => Val::Num(0.0) - oprand,
             Bang => Val::Bool(!oprand),
-            _ => return rt_err(""),
+            Semicolon => Val::Nil,
+            _ => return rt_err(format!("Unexpected unary operator: {}!", tt).as_str()),
         })
     }
 
@@ -99,11 +110,15 @@ impl Repl {
         })
     }
 
-    pub fn exec(&mut self, s: &S) -> Result {
-        self.eval(s, V::R)
+    pub fn exec(&mut self, s: &S<Token>) -> Result {
+        let result = self.eval(s, V::R);
+        for s in std::mem::replace(&mut self.out, Vec::new()) {
+            println!("{}", s);
+        }
+        result
     }
 
-    fn eval(&mut self, s: &S, v: V) -> Result {
+    fn eval(&mut self, s: &S<Token>, v: V) -> Result {
         use Token::*;
         //println!("{}", sexpr);
         match s {
@@ -112,13 +127,17 @@ impl Repl {
                 let oprand = self.eval(s, v)?;
                 self.unary(tt, oprand, v)
             }
-            S::Unary(_, _) => rt_err("Invalid Syntax!"),
+            S::Unary(Token::Kwd(Keywords::Print), e) => {
+                let s = format!("{}", self.eval(e, V::R)?);
+                self.out.push(s);
+                Ok(Val::Nil)
+            }
             S::Bin(Op(TokenType::Equal), left, right) => {
                 let l = self.eval(&left, V::L)?;
 
-                if let Val::Left(name) = l {
+                if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
-                    self.assign(name, r.clone(), false).ok_or_else(|| {
+                    self.assign(&name, r.clone(), false).ok_or_else(|| {
                         Error::RuntimeError(String::from(
                             "Variable not found. Declare it first before assignment.",
                         ))
@@ -127,12 +146,45 @@ impl Repl {
                     rt_err("Expected a left value to assign to.")
                 }
             }
+            S::Cons(Kwd(Keywords::Fun), tail) => match &tail[..] {
+                [S::Atom(Idt(name)), ref args @ .., body] => {
+                    let args: Vec<_> = args
+                        .iter()
+                        .map(|x| match x {
+                            S::Atom(Idt(name)) => name,
+                            _ => panic!("Invalid function declaration!"), //TODO: How to get rid of it?
+                        })
+                        .cloned()
+                        .collect();
+                    let func = Val::Fun(name.to_string(), args, body.clone());
+                    self.assign(name, func.clone(), true);
+                    Ok(func)
+                }
+                _ => rt_err("Expected a valid function declaration."),
+            },
+            S::Cons(Idt(name), tail) => match self.get(name) {
+                Some(Val::Fun(_, args, body)) => {
+                    if args.len() != tail.len() {
+                        return rt_err("Arity does not match!");
+                    }
+                    self.fork();
+                    for (arg, para) in zip(args, tail) {
+                        let v = self.eval(para, V::R)?;
+                        self.assign(&arg, v, true);
+                    }
+                    let e = self.exec(&body);
+                    self.unfork();
+                    e
+                }
+                Some(_) => rt_err("Object not callable!"),
+                _ => rt_err("Function does not exist!"),
+            },
             S::Bin(Kwd(Keywords::Var), left, right) => {
                 let l = self.eval(&left, V::L)?;
 
-                if let Val::Left(name) = l {
+                if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
-                    self.assign(name, r.clone(), true);
+                    self.assign(&name, r.clone(), true);
                     Ok(r)
                 } else {
                     rt_err("Expected a left value to assign to.")
@@ -158,11 +210,21 @@ impl Repl {
             },
             S::Cons(Kwd(Keywords::While), args) => match &args[..] {
                 [cond, loopdo] => {
-                    let mut ret = Val::Nil;
                     while self.eval(cond, V::R)?.into() {
-                        ret = self.exec(loopdo)?
+                        self.exec(loopdo)?;
                     }
-                    Ok(ret)
+                    Ok(Val::Nil)
+                }
+                _ => rt_err("Invalid If clause!"),
+            },
+            S::Cons(Kwd(Keywords::For), args) => match &args[..] {
+                [init, cond, end, loopdo] => {
+                    self.exec(init)?;
+                    while self.eval(cond, V::R)?.into() {
+                        self.exec(loopdo)?;
+                        self.exec(end)?;
+                    }
+                    Ok(Val::Nil)
                 }
                 _ => rt_err("Invalid If clause!"),
             },

@@ -109,7 +109,7 @@ impl Lexer<'_> {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> VecDeque<Token> {
+    pub fn scan(&mut self) -> VecDeque<Token> {
         use Token::*;
         use TokenType::*;
         let mut v = VecDeque::with_capacity(0);

@@ -4,23 +4,28 @@ use std::{
     ops::{Add, Div, Mul, Not, Sub},
 };
 
+use crate::{sexpr::S, token::Token};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Val {
     Str(String),
     Num(f64),
     Bool(bool),
     Obj(HashMap<String, Val>),
-    Left(String),
+    Var(String),
+    Fun(String, Vec<String>, S<Token>),
     Nil,
 }
 impl fmt::Display for Val {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Val::Str(s) => write!(f, "\"{}\"", s),
-            Val::Left(s) => write!(f, "{}", s),
+            Val::Var(n) => write!(f, "{}", n),
+            Val::Fun(n, args, _) => write!(f, "{}({})", n, args.join(", ")),
             Val::Bool(b) => write!(f, "{}", b),
             Val::Num(n) => write!(f, "{}", n),
             Val::Nil => write!(f, "nil"),
+
             Val::Obj(fields) => {
                 writeln!(f, "{{")?;
                 for (name, val) in fields {

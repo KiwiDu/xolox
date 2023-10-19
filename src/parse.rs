@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{
+    error::Error,
     sexpr::S,
     token::{Keywords, Token, TokenType},
 };
@@ -8,6 +9,19 @@ use crate::{
 pub struct Parser {
     stack: VecDeque<Token>,
 }
+
+type Result = core::result::Result<S<Token>, Error>;
+
+macro_rules! expect_to_match {
+    ($p:pat) => {
+        if matches!(self.peek()?, p) {
+            self.next()
+        } else {
+            None
+        }
+    };
+}
+
 impl Parser {
     pub fn from(tokens: VecDeque<Token>) -> Parser {
         Parser { stack: tokens }
@@ -39,10 +53,26 @@ impl Parser {
         }
         r
     }
-    pub fn parse_stmt(&mut self) -> S {
+
+    fn parse_group(&mut self) -> Vec<S<Token>> {
+        let mut args = Vec::new();
+        if self.peek() != Some(Token::from(")")) {
+            loop {
+                args.push(self.parse_expr());
+                if self.peek() != Some(Token::from(",")) {
+                    break;
+                }
+                self.next();
+            }
+        }
+        args
+    }
+
+    pub fn parse_stmt(&mut self) -> S<Token> {
         use Token::*;
         let token = self.peek().clone().unwrap_or(EOF);
         match token {
+            //Block stmt
             Op(TokenType::LeftBrace) => {
                 self.next();
                 let mut stmts = Vec::new();
@@ -52,23 +82,83 @@ impl Parser {
                 self.next();
                 S::Cons(token, stmts)
             }
-            Op(_) | Idt(_) | Str(_) | Num(_) => self.expect_after(
-                &mut Self::parse_expr,
-                TokenType::Semicolon,
-                "Unfinished stmt!",
-            ),
+            //Expr or expr stmt (Excluding Identifiers)
+            Op(_) | Str(_) | Num(_) => {
+                let e = self.parse_expr();
+                if matches!(self.peek(), Some(Op(TokenType::Semicolon))) {
+                    self.next();
+                    S::Unary(Op(TokenType::Semicolon), Box::new(e))
+                } else {
+                    e
+                }
+            }
+            //Identifiers could be a variable, a function or smothing else
+            ident @ Idt(_) => {
+                let e = self.parse_expr();
+                match self.peek() {
+                    // Expr stmt
+                    Some(Op(TokenType::Semicolon)) => {
+                        self.next();
+                        S::Unary(Op(TokenType::Semicolon), Box::new(e))
+                    }
+                    //Function call
+                    Some(Op(TokenType::LeftParen)) => {
+                        self.next();
+                        S::Cons(ident, self.parse_group())
+                    }
+                    //Expr
+                    None => e,
+                    _ => e,
+                }
+            }
+            //Print stmt
+            Kwd(Keywords::Print) => {
+                self.next();
+                S::Unary(
+                    token,
+                    Box::new(self.expect_after(
+                        &mut Self::parse_expr,
+                        TokenType::Semicolon,
+                        "Unfinished stmt!",
+                    )),
+                )
+            }
+            //Declaration stmts w. optional assignment
             Kwd(Keywords::Var) => {
                 self.next();
-                if let S::Bin(Op(TokenType::Equal), l, r) = self.expect_after(
+                match self.expect_after(
                     &mut Self::parse_expr,
                     TokenType::Semicolon,
                     "Unfinished stmt!",
                 ) {
-                    S::Bin(token, l, r)
-                } else {
-                    panic!("Expected an assignment statment!")
+                    S::Bin(Op(TokenType::Equal), l, r) => S::Bin(token, l, r),
+                    name @ S::Atom(Idt(_)) => {
+                        S::Bin(token, Box::new(name), Box::new(S::Atom(Token::NoOp)))
+                    }
+                    _ => panic!("Expected an assignment statment!"),
                 }
             }
+            Kwd(Keywords::Fun) => {
+                self.next();
+                //let name = self.parse_expr();
+                let name = match self.expect_after(
+                    &mut Self::parse_expr,
+                    "(".into(),
+                    "Expect left paren to introduce arguments!",
+                ) {
+                    idt @ S::Atom(Idt(_)) => idt,
+                    _ => panic!("Expected a valid identifier to name a new function!"),
+                };
+
+                let mut args = vec![name];
+                args.extend(self.parse_group());
+                if self.next() != Some(Token::from(")")) {
+                    panic!("Unfinished function declaration!");
+                }
+                args.push(self.parse_stmt());
+                S::Cons(token, args)
+            }
+            //If stmt and else caluse
             Kwd(Keywords::If) => {
                 self.next();
                 let cond = self.parse_expr();
@@ -80,6 +170,7 @@ impl Parser {
 
                 S::Cons(token, vec![cond, thendo, elsedo])
             }
+            //Loop stmts, namely c-styled for and while
             Kwd(Keywords::While) => {
                 self.next();
                 let cond = self.parse_expr();
@@ -87,6 +178,20 @@ impl Parser {
 
                 S::Cons(token, vec![cond, loopdo])
             }
+            Kwd(Keywords::For) => {
+                self.next();
+                let init = self.parse_stmt();
+                let cond = self.expect_after(
+                    &mut Self::parse_expr,
+                    TokenType::Semicolon,
+                    "Expected semicolon as delimiter!",
+                );
+                let end = self.parse_expr();
+                let loopdo = self.parse_stmt();
+
+                S::Cons(token, vec![init, cond, end, loopdo])
+            }
+
             Kwd(_) => todo!(),
 
             NoOp => panic!("Unexpected NoOp!"),
@@ -94,11 +199,11 @@ impl Parser {
         }
     }
 
-    pub fn parse_expr(&mut self) -> S {
+    pub fn parse_expr(&mut self) -> S<Token> {
         self.expr(0, 0)
     }
 
-    fn expr(&mut self, power: u8, level: usize) -> S {
+    fn expr(&mut self, power: u8, level: usize) -> S<Token> {
         //let indent = "    ".repeat(level);
         //println!("{}Stack: {:?}", indent, self.stack);
         use Keywords::*;
@@ -107,7 +212,7 @@ impl Parser {
         let mut left = match token {
             Op(TokenType::LeftParen) => {
                 let e = self.expr(0, level + 1);
-                if Some(Op(TokenType::RightParen)) != self.next() {
+                if Some(Token::from(")")) != self.next() {
                     panic!("Expected a matching right parenthesis!")
                 }; //Must be right parenthesis.
                 e
@@ -157,7 +262,7 @@ impl Parser {
 fn prefix_power(t: TokenType) -> ((), u8) {
     use TokenType::*;
     match t {
-        Minus | Plus => ((), 255),
+        Minus | Plus | Bang => ((), 255),
         _ => panic!("Bad token! Got '{:#?}', expected a prefix!", t),
     }
 }
@@ -177,7 +282,7 @@ fn infix_power(t: TokenType) -> Option<(u8, u8)> {
 fn postfix_power(t: TokenType) -> Option<(u8, ())> {
     use TokenType::*;
     Some(match t {
-        Bang => (255, ()),
+        Bang => return None, //(255, ()),
         _ => return None,
     })
 }
