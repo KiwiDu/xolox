@@ -91,7 +91,7 @@ impl Parser {
                 S::Cons(token, stmts)
             }
             //Expr or expr stmt (Excluding Identifiers)
-            Op(_) | Str(_) | Num(_) => {
+            Op(_) | Idt(_) | Str(_) | Num(_) => {
                 let e = self.parse_expr();
                 if matches!(self.peek(), Some(Op(TokenType::Semicolon))) {
                     self.next();
@@ -101,7 +101,7 @@ impl Parser {
                 }
             }
             //Identifiers could be a variable, a function or smothing else
-            ident @ Idt(_) => {
+            /* ident @ Idt(_) => {
                 let e = self.parse_expr();
                 match self.peek() {
                     // Expr stmt
@@ -114,7 +114,7 @@ impl Parser {
                         self.next();
                         let r = S::Cons(ident, self.parse_paren_inner());
                         if self.next() != Some(Token::from(")")) {
-                            return stx_err("Unfinished function declaration!");
+                            return stx_err("Unfinished function call!");
                         }
                         if self.peek() == Some(Token::from(";")) {
                             self.next();
@@ -126,7 +126,7 @@ impl Parser {
                     None => e,
                     _ => e,
                 }
-            }
+            } */
             //Print stmt
             Kwd(Keywords::Print) => {
                 self.next();
@@ -156,23 +156,24 @@ impl Parser {
             }
             Kwd(Keywords::Fun) => {
                 self.next();
-                //let name = self.parse_expr();
-                let name = match self.expect_after(
-                    &mut Self::parse_expr,
-                    "(".into(),
-                    "Expect left paren to introduce arguments!",
-                )? {
-                    idt @ S::Atom(Idt(_)) => idt,
-                    _ => return stx_err("Expected a valid identifier to name a new function!"),
-                };
-
-                let mut args = vec![name];
-                args.extend(self.parse_paren_inner());
-                if self.next() != Some(Token::from(")")) {
-                    return stx_err("Unfinished function declaration!");
+                match self.parse_expr() {
+                    S::Cons(idt @ Idt(_), mut args) => {
+                        args.reserve(2);
+                        args.insert(0, S::Atom(idt));
+                        args.push(self.parse_stmt()?);
+                        S::Cons(token, args)
+                    }
+                    _ => return stx_err("Invalid function declaration!"),
                 }
-                args.push(self.parse_stmt()?);
-                S::Cons(token, args)
+            }
+            //Return Stmt
+            Kwd(Keywords::Return) => {
+                self.next();
+                let retval = self.parse_expr();
+                if self.next() != Some(Token::from(";")) {
+                    return stx_err("Missing semicolon after a return statment!");
+                }
+                S::Unary(token, Box::new(retval))
             }
             //If stmt and else caluse
             Kwd(Keywords::If) => {
@@ -238,7 +239,19 @@ impl Parser {
                 let right = self.expr(r, level + 1);
                 S::Unary(token.clone(), Box::new(right))
             }
-            Num(_) | Idt(_) | Str(_) | Kwd(True) | Kwd(False) => S::Atom(token.clone()),
+            Num(_) | Str(_) | Kwd(True) | Kwd(False) => S::Atom(token.clone()),
+            Idt(_) => {
+                if self.peek() == Some(Token::from("(")) {
+                    self.next();
+                    let r = S::Cons(token, self.parse_paren_inner());
+                    if self.next() != Some(Token::from(")")) {
+                        panic!("Unfinished function call!");
+                    }
+                    r
+                } else {
+                    S::Atom(token)
+                }
+            }
             EOF => panic!("Unexpected End of File!"),
             _ => panic!(
                 "Bad token! Got '{:#?}', expected a prefix or an expr!",

@@ -14,6 +14,7 @@ pub enum Val {
     Obj(HashMap<String, Val>),
     Var(String),
     Fun(String, Vec<String>, S<Token>),
+    FFun(String, Vec<String>),
     Nil,
 }
 impl fmt::Display for Val {
@@ -21,6 +22,7 @@ impl fmt::Display for Val {
         match &self {
             Val::Str(s) => write!(f, "\"{}\"", s),
             Val::Var(n) => write!(f, "{}", n),
+
             Val::Fun(n, args, _) => write!(f, "{}({})", n, args.join(", ")),
             Val::Bool(b) => write!(f, "{}", b),
             Val::Num(n) => write!(f, "{}", n),
@@ -33,6 +35,7 @@ impl fmt::Display for Val {
                 }
                 write!(f, "}}")
             }
+            Val::FFun(n, args) => write!(f, "<ffi: {}({})>", n, args.join(", ")),
         }
     }
 }

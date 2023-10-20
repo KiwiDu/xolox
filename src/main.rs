@@ -12,7 +12,7 @@ fn run(repl: &mut Repl, parser: &mut Parser) -> Result<Val, Error> {
 
 fn main() {
     let mut repl = Repl::new();
-
+    //let (option, files) = env::args().skip(1).partition(|a| a.starts_with("-"));
     for arg in env::args().skip(1) {
         let file = from_file(&arg).unwrap();
         let mut parser = Parser::from(file);
@@ -29,6 +29,9 @@ fn main() {
                     println!("Syntax Error: {}", msg);
                     break;
                 }
+                Err(Error::Return(v)) => {
+                    println!("Returns(Shouldn't have appeared): {}", v);
+                }
             }
         }
     }
@@ -41,6 +44,9 @@ fn main() {
             Ok(v) => println!("{}", v),
             Err(Error::RuntimeError(msg)) => println!("Runtime Error: {}", msg),
             Err(Error::SyntaxError(msg)) => println!("Syntax Error: {}", msg),
+            Err(Error::Return(v)) => {
+                println!("Returns(Shouldn't have appeared): {}", v);
+            }
         }
 
         //println!("State: {:?}", repl.env);

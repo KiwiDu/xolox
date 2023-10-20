@@ -1,5 +1,12 @@
 fun print_sum(a, b, c){
     print a+b+c;
 }
-
-print_sum(1, 2, 3);
+fun six(){
+    return 6;
+}
+fun fac(n){
+    if (n<1) {
+        return 1;
+    }
+    return n*fac(n-1);
+}

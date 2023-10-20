@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::zip};
+use std::{collections::HashMap, iter::zip, time::Instant};
 
 use crate::{
     error::Error,
@@ -19,9 +19,17 @@ fn rt_err(s: &str) -> Result {
     Err(Error::RuntimeError(s.to_owned()))
 }
 
+fn extract(r: Result) -> Result {
+    match r {
+        Err(Error::Return(v)) => Ok(v),
+        _ => r,
+    }
+}
+
 pub struct Repl {
     pub env: Vec<HashMap<String, Val>>,
     pub out: Vec<String>,
+    clock: Instant,
 }
 
 impl Repl {
@@ -53,10 +61,13 @@ impl Repl {
 
 impl Repl {
     pub fn new() -> Self {
-        Self {
+        let mut repl = Self {
             env: vec![HashMap::new()],
             out: vec![],
-        }
+            clock: Instant::now(),
+        };
+        repl.assign("clock", Val::FFun("clock".to_string(), vec![]), true);
+        repl
     }
 
     fn atom(&mut self, t: Token, v: V) -> Result {
@@ -163,6 +174,15 @@ impl Repl {
                 _ => rt_err("Expected a valid function declaration."),
             },
             S::Cons(Idt(name), tail) => match self.get(name) {
+                Some(Val::FFun(name, args)) => {
+                    if args.len() != tail.len() {
+                        return rt_err("Arity does not match!");
+                    }
+                    match &name[..] {
+                        "clock" => Ok(Val::Num(self.clock.elapsed().as_secs_f64())),
+                        _ => return rt_err("Such foreign function does not exist!"),
+                    }
+                }
                 Some(Val::Fun(_, args, body)) => {
                     if args.len() != tail.len() {
                         return rt_err("Arity does not match!");
@@ -172,7 +192,7 @@ impl Repl {
                         let v = self.eval(para, V::R)?;
                         self.assign(&arg, v, true);
                     }
-                    let e = self.exec(&body);
+                    let e = extract(self.exec(&body));
                     self.unfork();
                     e
                 }
@@ -196,8 +216,13 @@ impl Repl {
                 self.binary(tt, l, r, v)
             }
             S::Cons(Op(TokenType::LeftBrace), stmts) => {
-                stmts.iter().map(|s| self.exec(s)).last().unwrap()
+                let mut val = Val::Nil;
+                for s in stmts.iter() {
+                    val = self.exec(s)?
+                }
+                Ok(val)
             }
+            S::Unary(Kwd(Keywords::Return), retval) => Err(Error::Return(self.exec(retval)?)),
             S::Cons(Kwd(Keywords::If), args) => match &args[..] {
                 [cond, thendo, elsedo] => {
                     if self.eval(cond, V::R)?.into() {
@@ -215,7 +240,7 @@ impl Repl {
                     }
                     Ok(Val::Nil)
                 }
-                _ => rt_err("Invalid If clause!"),
+                _ => rt_err("Invalid While clause!"),
             },
             S::Cons(Kwd(Keywords::For), args) => match &args[..] {
                 [init, cond, end, loopdo] => {
@@ -226,7 +251,7 @@ impl Repl {
                     }
                     Ok(Val::Nil)
                 }
-                _ => rt_err("Invalid If clause!"),
+                _ => rt_err("Invalid For clause!"),
             },
             _ => todo!(),
         }
