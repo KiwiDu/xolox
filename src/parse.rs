@@ -15,7 +15,7 @@ type Result = core::result::Result<S<Token>, Error>;
 fn stx_err(s: &str) -> Result {
     Err(Error::SyntaxError(s.to_owned()))
 }
-
+/*
 macro_rules! expect_to_match {
     ($p:pat) => {
         if matches!(self.peek()?, p) {
@@ -24,7 +24,7 @@ macro_rules! expect_to_match {
             None
         }
     };
-}
+}*/
 
 impl Parser {
     pub fn from(tokens: VecDeque<Token>) -> Parser {
@@ -310,8 +310,8 @@ fn infix_power(t: TokenType) -> Option<(u8, u8)> {
 
 fn postfix_power(t: TokenType) -> Option<(u8, ())> {
     use TokenType::*;
-    Some(match t {
+    match t {
         Bang => return None, //(255, ()),
         _ => return None,
-    })
+    }
 }

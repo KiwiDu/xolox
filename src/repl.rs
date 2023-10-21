@@ -148,7 +148,7 @@ impl Repl {
 
                 if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
-                    self.assign(&name, r.clone(), false).ok_or_else(|| {
+                    self.assign(&name, r, false).ok_or_else(|| {
                         Error::RuntimeError(String::from(
                             "Variable not found. Declare it first before assignment.",
                         ))
