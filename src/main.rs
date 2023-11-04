@@ -1,7 +1,19 @@
 use std::env;
+use std::fmt::Display;
+use std::mem::swap;
 use std::thread;
-use xolox::{error::Error, from_file, from_stdin, parse::Parser, repl::Repl, value::Val};
-
+use xolox::compile::Compiler;
+use xolox::vm::VM;
+use xolox::vmval::VmVal as Val;
+use xolox::{
+    error::Error,
+    from_file,
+    from_stdin,
+    parse::Parser,
+    repl::Repl,
+    //value::Val
+};
+/*
 fn run(repl: &mut Repl, parser: &mut Parser, verbose: bool) -> Result<Val, Error> {
     let s = parser.parse_stmt()?;
     if verbose {
@@ -10,12 +22,18 @@ fn run(repl: &mut Repl, parser: &mut Parser, verbose: bool) -> Result<Val, Error
 
     repl.exec(&s)
 }
-
-fn file_loop(repl: &mut Repl, opt: &Options, path: &str) {
+*/
+fn file_loop<T>(
+    opt: &Options,
+    path: &str,
+    mut run: impl FnMut(&mut Parser, &Options) -> Result<T, Error>,
+) where
+    T: Display,
+{
     let file = from_file(path).unwrap();
     let mut parser = Parser::from(file);
     while !parser.eof() {
-        let result = run(repl, &mut parser, opt.verbose);
+        let result = run(&mut parser, opt);
         if opt.verbose {
             print!("   => ");
             match result {
@@ -36,26 +54,31 @@ fn file_loop(repl: &mut Repl, opt: &Options, path: &str) {
     }
 }
 
-fn stdin_loop(repl: &mut Repl, opt: &Options) {
+fn stdin_loop<T>(opt: &Options, mut run: impl FnMut(&mut Parser, &Options) -> Result<T, Error>)
+where
+    T: Display,
+{
     if !opt.repl {
         return;
     }
     while let Some(tokens) = from_stdin() {
         let mut parser = Parser::from(tokens);
-        let result = run(repl, &mut parser, opt.verbose);
+        let result = run(&mut parser, opt);
 
-        print!("   => ");
-        match result {
-            Ok(v) => println!("{}", v),
-            Err(Error::RuntimeError(msg)) => println!("Runtime Error: {}", msg),
-            Err(Error::SyntaxError(msg)) => println!("Syntax Error: {}", msg),
-            Err(Error::Return(v)) => {
-                println!("Returns(Shouldn't have appeared): {}", v);
+        if opt.verbose {
+            print!("   => ");
+            match result {
+                Ok(v) => println!("{}", v),
+                Err(Error::RuntimeError(msg)) => println!("Runtime Error: {}", msg),
+                Err(Error::SyntaxError(msg)) => println!("Syntax Error: {}", msg),
+                Err(Error::Return(v)) => {
+                    println!("Returns(Shouldn't have appeared): {}", v);
+                }
             }
         }
-        if opt.state {
+        /* if opt.state {
             println!("State: {:?}", repl.env);
-        }
+        } */
     }
 }
 
@@ -84,18 +107,55 @@ impl Options {
     }
 }
 
+fn s(vm: &mut VM, c: &mut Compiler) {
+    swap(&mut c.heap, &mut vm.heap);
+    swap(&mut c.chunk, &mut vm.chunk);
+}
 fn main() {
-    let mut repl = Repl::new();
+    let mut compiler = Compiler::new();
+    let mut vm = VM::new();
+    /* let mut repl = Repl::new();*/
     let (flags, files) = env::args().skip(1).partition(|a| a.starts_with("-"));
     let options = Options::from(&flags, &files);
-    let handler = thread::Builder::new()
-        .stack_size(200 * 1024 * 1024)
-        .spawn(move || {
-            for path in files.iter() {
-                file_loop(&mut repl, &options, path);
+    for path in files.iter() {
+        file_loop(&options, path, |parser: &mut Parser, opt: &Options| {
+            while let Ok(a) = &parser.parse_stmt() {
+                println!("{}", a);
+                compiler.compile(a, false);
             }
-            stdin_loop(&mut repl, &options);
-        })
-        .expect("can't spawn thread");
-    handler.join().expect("can't spawn thread");
+            println!();
+            compiler.dasm();
+            println!();
+            s(&mut vm, &mut compiler);
+            let output = vm.run().unwrap_or(&Val::Nil);
+            let output = format!("{}", output);
+            println!(
+                "{:?}\n\
+                \tHeap  = {:?}\n\
+                \tStack = {:?}\n\
+                \tGlobal= {:?}",
+                output, vm.heap, vm.stack, vm.globals
+            );
+
+            s(&mut vm, &mut compiler);
+            Ok(output)
+        });
+    }
+
+    stdin_loop(&options, |parser: &mut Parser, opt: &Options| {
+        compiler.compile(&parser.parse_stmt().ok().unwrap(), false);
+        s(&mut vm, &mut compiler);
+        let output = vm.run().unwrap_or(&Val::Nil);
+        let output = format!("{}", output);
+        println!(
+            "{:?}\n\
+            \tHeap  = {:?}\n\
+            \tStack = {:?}\n\
+            \tGlobal= {:?}",
+            output, vm.heap, vm.stack, vm.globals
+        );
+
+        s(&mut vm, &mut compiler);
+        Ok(output)
+    });
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::zip, time::Instant};
+use std::{collections::HashMap, iter::zip, rc::Rc, time::Instant};
 
 use crate::{
     error::Error,
@@ -33,16 +33,20 @@ pub struct Repl {
 }
 
 impl Repl {
-    fn assign(&mut self, name: &str, v: Val, init: bool) -> Option<Val> {
+    fn define(&mut self, name: &str, v: Val) -> Option<Val> {
         let frame = self.env.last_mut().unwrap();
-        if init || frame.contains_key(name) {
+        frame.insert(name.to_owned(), v)
+    }
+    fn assign(&mut self, name: &str, v: Val) -> Option<Val> {
+        let frame = self.env.last_mut().unwrap();
+        if frame.contains_key(name) {
             frame.insert(name.to_owned(), v)
         } else {
             None
         }
     }
-    fn get(&mut self, name: &str) -> Option<Val> {
-        for frame in self.env.iter_mut().rev() {
+    fn get(&self, name: &str) -> Option<Val> {
+        for frame in self.env.iter().rev() {
             if frame.contains_key(name) {
                 return frame.get(name).cloned();
             }
@@ -66,7 +70,7 @@ impl Repl {
             out: vec![],
             clock: Instant::now(),
         };
-        repl.assign("clock", Val::FFun("clock".to_string(), vec![]), true);
+        repl.define("clock", Val::FFun("clock".to_string(), vec![]));
         repl
     }
 
@@ -76,6 +80,7 @@ impl Repl {
             (V::L, _) => rt_err("Expected a left value to assign to."),
             (V::R, Token::Idt(id)) => self
                 .get(&id)
+                //.map(|x| *x)
                 .ok_or_else(|| Error::RuntimeError(String::from("Variable not found."))), // Retrieve from the state
             (V::R, Token::Kwd(Keywords::True)) => Ok(Val::Bool(true)),
             (V::R, Token::Kwd(Keywords::False)) => Ok(Val::Bool(false)),
@@ -94,14 +99,14 @@ impl Repl {
         }
         Ok(match tt {
             Plus => oprand,
-            Minus => Val::Num(0.0) - oprand,
-            Bang => Val::Bool(!oprand),
+            Minus => &Val::Num(0.0) - &oprand,
+            Bang => Val::Bool(!&oprand),
             Semicolon => Val::Nil,
             _ => return rt_err(format!("Unexpected unary operator: {}!", tt).as_str()),
         })
     }
 
-    fn binary(&mut self, tt: &TokenType, left: Val, right: Val, v: V) -> Result {
+    fn binary(&mut self, tt: &TokenType, left: &Val, right: &Val, v: V) -> Result {
         use TokenType::*;
         if v == V::L {
             return rt_err("Cannot be used as a left value.");
@@ -129,9 +134,38 @@ impl Repl {
         result
     }
 
+    fn handle_func_call(&mut self, name: &str, tail: &Vec<S<Token>>) -> Result {
+        let idt = self.get(name);
+        match idt {
+            Some(Val::FFun(name, args)) => {
+                if args.len() != tail.len() {
+                    return rt_err("Arity does not match!");
+                }
+                match &name[..] {
+                    "clock" => Ok(Val::Num(self.clock.elapsed().as_secs_f64())),
+                    _ => return rt_err("Such foreign function does not exist!"),
+                }
+            }
+            Some(Val::Fun(_, args, body)) => {
+                if args.len() != tail.len() {
+                    return rt_err("Arity does not match!");
+                }
+                self.fork();
+                for (arg, para) in zip(args, tail) {
+                    let v = self.eval(para, V::R)?;
+                    self.define(&arg, v);
+                }
+                let e = extract(self.exec(&body));
+                self.unfork();
+                e
+            }
+            Some(_) => rt_err("Object not callable!"),
+            _ => rt_err("Function does not exist!"),
+        }
+    }
+
     fn eval(&mut self, s: &S<Token>, v: V) -> Result {
         use Token::*;
-        //println!("{}", sexpr);
         match s {
             S::Atom(t) => self.atom(t.clone(), v),
             S::Unary(Op(tt), s) => {
@@ -148,7 +182,7 @@ impl Repl {
 
                 if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
-                    self.assign(&name, r, false).ok_or_else(|| {
+                    self.assign(&name, r).ok_or_else(|| {
                         Error::RuntimeError(String::from(
                             "Variable not found. Declare it first before assignment.",
                         ))
@@ -160,7 +194,7 @@ impl Repl {
             S::Cons(Kwd(Keywords::Fun), tail) => match &tail[..] {
                 [S::Atom(Idt(name)), ref args @ .., body] => {
                     let args: Vec<_> = args
-                        .iter()
+                        .into_iter()
                         .map(|x| match x {
                             S::Atom(Idt(name)) => name,
                             _ => panic!("Invalid function declaration!"), //TODO: How to get rid of it?
@@ -168,43 +202,18 @@ impl Repl {
                         .cloned()
                         .collect();
                     let func = Val::Fun(name.to_string(), args, body.clone());
-                    self.assign(name, func.clone(), true);
+                    self.define(name, func.clone());
                     Ok(func)
                 }
                 _ => rt_err("Expected a valid function declaration."),
             },
-            S::Cons(Idt(name), tail) => match self.get(name) {
-                Some(Val::FFun(name, args)) => {
-                    if args.len() != tail.len() {
-                        return rt_err("Arity does not match!");
-                    }
-                    match &name[..] {
-                        "clock" => Ok(Val::Num(self.clock.elapsed().as_secs_f64())),
-                        _ => return rt_err("Such foreign function does not exist!"),
-                    }
-                }
-                Some(Val::Fun(_, args, body)) => {
-                    if args.len() != tail.len() {
-                        return rt_err("Arity does not match!");
-                    }
-                    self.fork();
-                    for (arg, para) in zip(args, tail) {
-                        let v = self.eval(para, V::R)?;
-                        self.assign(&arg, v, true);
-                    }
-                    let e = extract(self.exec(&body));
-                    self.unfork();
-                    e
-                }
-                Some(_) => rt_err("Object not callable!"),
-                _ => rt_err("Function does not exist!"),
-            },
+            S::Cons(Idt(name), tail) => self.handle_func_call(name, tail),
             S::Bin(Kwd(Keywords::Var), left, right) => {
                 let l = self.eval(&left, V::L)?;
 
                 if let Val::Var(name) = l {
                     let r = self.eval(&right, V::R)?;
-                    self.assign(&name, r.clone(), true);
+                    self.define(&name, r.clone());
                     Ok(r)
                 } else {
                     rt_err("Expected a left value to assign to.")
@@ -213,7 +222,7 @@ impl Repl {
             S::Bin(Op(tt), left, right) => {
                 let l = self.eval(left, v)?; // Left side first
                 let r = self.eval(right, v)?;
-                self.binary(tt, l, r, v)
+                self.binary(tt, &l, &r, v)
             }
             S::Cons(Op(TokenType::LeftBrace), stmts) => {
                 let mut val = Val::Nil;
@@ -225,7 +234,7 @@ impl Repl {
             S::Unary(Kwd(Keywords::Return), retval) => Err(Error::Return(self.exec(retval)?)),
             S::Cons(Kwd(Keywords::If), args) => match &args[..] {
                 [cond, thendo, elsedo] => {
-                    if self.eval(cond, V::R)?.into() {
+                    if (&self.eval(cond, V::R)?).into() {
                         self.exec(thendo)
                     } else {
                         self.exec(elsedo)
@@ -235,7 +244,7 @@ impl Repl {
             },
             S::Cons(Kwd(Keywords::While), args) => match &args[..] {
                 [cond, loopdo] => {
-                    while self.eval(cond, V::R)?.into() {
+                    while (&self.eval(cond, V::R)?).into() {
                         self.exec(loopdo)?;
                     }
                     Ok(Val::Nil)
@@ -245,7 +254,7 @@ impl Repl {
             S::Cons(Kwd(Keywords::For), args) => match &args[..] {
                 [init, cond, end, loopdo] => {
                     self.exec(init)?;
-                    while self.eval(cond, V::R)?.into() {
+                    while (&self.eval(cond, V::R)?).into() {
                         self.exec(loopdo)?;
                         self.exec(end)?;
                     }

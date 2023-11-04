@@ -1,52 +1,46 @@
 use std::{
-    collections::HashMap,
     fmt,
     ops::{Add, Div, Mul, Not, Sub},
+    rc::Rc,
 };
 
-use crate::{sexpr::S, token::Token};
-
 #[derive(Debug, Clone, PartialEq)]
-pub enum Val {
-    Str(String),
+pub enum VmVal {
+    Str(Rc<str>),
     Num(f64),
     Bool(bool),
-    Obj(HashMap<String, Val>),
-    Var(String),
-    Fun(String, Vec<String>, S<Token>),
-    FFun(String, Vec<String>),
+    Var(Rc<str>),
+    Fun(Rc<str>, Vec<u8>),
     Nil,
 }
-impl fmt::Display for Val {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            Val::Str(s) => write!(f, "\"{}\"", s),
-            Val::Var(n) => write!(f, "{}", n),
-
-            Val::Fun(n, args, _) => write!(f, "{}({})", n, args.join(", ")),
-            Val::Bool(b) => write!(f, "{}", b),
-            Val::Num(n) => write!(f, "{}", n),
-            Val::Nil => write!(f, "nil"),
-
-            Val::Obj(fields) => {
-                writeln!(f, "{{")?;
-                for (name, val) in fields {
-                    writeln!(f, "    {} : {}", name, val)?
-                }
-                write!(f, "}}")
-            }
-            Val::FFun(n, args) => write!(f, "<ffi: {}({})>", n, args.join(", ")),
+impl VmVal {
+    pub fn extract_str(&self) -> Option<Rc<str>> {
+        match self {
+            VmVal::Str(s) | VmVal::Var(s) | VmVal::Fun(s, _) => Some(Rc::clone(s)),
+            _ => None,
         }
     }
 }
-impl From<bool> for Val {
-    fn from(value: bool) -> Self {
-        Val::Bool(value)
+impl fmt::Display for VmVal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            VmVal::Str(s) => write!(f, "\"{}\"", s),
+            VmVal::Var(n) => write!(f, "<var {}>", n),
+            VmVal::Fun(n, _) => write!(f, "<fun {}>", n),
+            VmVal::Bool(b) => write!(f, "{}", b),
+            VmVal::Num(n) => write!(f, "{}", n),
+            VmVal::Nil => write!(f, "nil"),
+        }
     }
 }
-impl From<&Val> for bool {
-    fn from(value: &Val) -> Self {
-        use Val::*;
+impl From<bool> for VmVal {
+    fn from(value: bool) -> Self {
+        VmVal::Bool(value)
+    }
+}
+impl From<&VmVal> for bool {
+    fn from(value: &VmVal) -> Self {
+        use VmVal::*;
         match value {
             Str(s) => !s.is_empty(),
             Num(n) => n.is_normal(),
@@ -55,7 +49,7 @@ impl From<&Val> for bool {
         }
     }
 }
-impl Not for &Val {
+impl Not for &VmVal {
     type Output = bool;
 
     fn not(self) -> Self::Output {
@@ -63,24 +57,24 @@ impl Not for &Val {
         !b
     }
 }
-impl Add for &Val {
-    type Output = Val;
+impl Add for &VmVal {
+    type Output = VmVal;
 
     fn add(self, rhs: Self) -> Self::Output {
-        use Val::*;
+        use VmVal::*;
         match (self, rhs) {
-            (Str(a), Str(b)) => Str(format!("{}{}", a, b)),
+            (Str(a), Str(b)) => Str(format!("{}{}", a, b).into()),
             (Num(a), Num(b)) => Num(a + b),
             (a, b) => panic!("Invalid operation add for '{}' and '{}'!", a, b),
         }
     }
 }
 
-impl Sub for &Val {
-    type Output = Val;
+impl Sub for &VmVal {
+    type Output = VmVal;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        use Val::*;
+        use VmVal::*;
         match (self, rhs) {
             (Num(a), Num(b)) => Num(a - b),
             (a, b) => panic!("Invalid operation sub for '{}' and '{}'!", a, b),
@@ -88,24 +82,24 @@ impl Sub for &Val {
     }
 }
 
-impl Mul for &Val {
-    type Output = Val;
+impl Mul for &VmVal {
+    type Output = VmVal;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        use Val::*;
+        use VmVal::*;
         match (self, rhs) {
             (Num(a), Num(b)) => Num(a * b),
-            (Str(a), Num(b)) => Str(a.repeat(*b as usize)),
+            (Str(a), Num(b)) => Str(a.repeat(*b as usize).into()),
             (a, b) => panic!("Invalid operation mul for '{}' and '{}'!", a, b),
         }
     }
 }
 
-impl Div for &Val {
-    type Output = Val;
+impl Div for &VmVal {
+    type Output = VmVal;
 
     fn div(self, rhs: Self) -> Self::Output {
-        use Val::*;
+        use VmVal::*;
         match (self, rhs) {
             (Num(a), Num(b)) => Num(a / b),
             (a, b) => panic!("Invalid operation div for '{}' and '{}'!", a, b),
@@ -113,9 +107,9 @@ impl Div for &Val {
     }
 }
 
-impl PartialOrd for &Val {
+impl PartialOrd for &VmVal {
     fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
-        use Val::*;
+        use VmVal::*;
         match (self, rhs) {
             (Num(a), Num(b)) => a.partial_cmp(b),
             (a, b) => panic!("Invalid comparison for '{}' and '{}'!", a, b),
@@ -123,4 +117,4 @@ impl PartialOrd for &Val {
     }
 }
 
-impl Eq for Val {}
+impl Eq for VmVal {}

@@ -91,7 +91,8 @@ impl Parser {
                 S::Cons(token, stmts)
             }
             //Expr or expr stmt (Excluding Identifiers)
-            Op(_) | Idt(_) | Str(_) | Num(_) => {
+            Op(_) | Idt(_) | Str(_) | Num(_) | Kwd(Keywords::True) | Kwd(Keywords::False)
+            | Kwd(Keywords::Nil) => {
                 let e = self.parse_expr();
                 if matches!(self.peek(), Some(Op(TokenType::Semicolon))) {
                     self.next();
@@ -100,33 +101,6 @@ impl Parser {
                     e
                 }
             }
-            //Identifiers could be a variable, a function or smothing else
-            /* ident @ Idt(_) => {
-                let e = self.parse_expr();
-                match self.peek() {
-                    // Expr stmt
-                    Some(Op(TokenType::Semicolon)) => {
-                        self.next();
-                        S::Unary(Op(TokenType::Semicolon), Box::new(e))
-                    }
-                    //Function call
-                    Some(Op(TokenType::LeftParen)) => {
-                        self.next();
-                        let r = S::Cons(ident, self.parse_paren_inner());
-                        if self.next() != Some(Token::from(")")) {
-                            return stx_err("Unfinished function call!");
-                        }
-                        if self.peek() == Some(Token::from(";")) {
-                            self.next();
-                            return Ok(S::Unary(Op(TokenType::Semicolon), Box::new(r)));
-                        }
-                        r
-                    }
-                    //Expr
-                    None => e,
-                    _ => e,
-                }
-            } */
             //Print stmt
             Kwd(Keywords::Print) => {
                 self.next();
@@ -239,7 +213,7 @@ impl Parser {
                 let right = self.expr(r, level + 1);
                 S::Unary(token.clone(), Box::new(right))
             }
-            Num(_) | Str(_) | Kwd(True) | Kwd(False) => S::Atom(token.clone()),
+            Num(_) | Str(_) | Kwd(True) | Kwd(False) | Kwd(Nil) => S::Atom(token.clone()),
             Idt(_) => {
                 if self.peek() == Some(Token::from("(")) {
                     self.next();
