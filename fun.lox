@@ -1,0 +1,5 @@
+fun six(){
+    print 6;
+}
+
+six()

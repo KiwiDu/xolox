@@ -1,6 +1,12 @@
-use std::{collections::HashMap, mem::transmute, rc::Rc, time::Instant};
+use std::{
+    collections::HashMap,
+    mem::{replace, swap, transmute},
+    ptr::slice_from_raw_parts,
+    rc::Rc,
+    time::Instant,
+};
 
-use crate::vmval::VmVal as Val;
+use crate::{compile::Compiler, vmval::VmVal as Val};
 
 #[derive(Debug, Clone, Copy)]
 pub enum OpCode {
@@ -54,13 +60,60 @@ impl Metal {
 }
 
 pub struct VM {
-    pub chunk: Vec<u8>, //
+    frames: Vec<Frame>,
+    //pub chunk: Vec<u8>, //
     pub stack: Vec<u64>,
     pub heap: Vec<Val>, //
 
     pub globals: HashMap<Rc<str>, u64>,
-    pc: usize,
+    //pc: usize,
     timer: Instant,
+}
+struct Frame {
+    chunk: *const Vec<u8>,
+    pc: usize,
+}
+
+impl Frame {
+    fn fun(chunk: &Vec<u8>) -> Self {
+        Self { chunk, pc: 0 }
+    }
+    fn next(&mut self) -> u8 {
+        let chunk = unsafe { self.chunk.as_ref() }.unwrap();
+        if self.pc >= chunk.len() {
+            return OpCode::RETURN as u8;
+        }
+        let v = chunk[self.pc];
+        self.pc += 1;
+        v
+    }
+
+    fn next_op(&mut self) -> OpCode {
+        let v = self.next();
+        if v >= OpCode::SENTIAL as u8 {
+            panic!("Corrupted VM");
+        }
+        unsafe { transmute(v) }
+    }
+
+    fn fwd(&mut self, step: usize) -> &[u8] {
+        let beg = self.pc;
+        self.pc += step;
+        let chunk = unsafe { self.chunk.as_ref() }.unwrap();
+        &chunk[beg..self.pc]
+    }
+
+    fn next16(&mut self) -> u16 {
+        u16::from_be_bytes(self.fwd(2).try_into().unwrap())
+    }
+
+    fn next32(&mut self) -> u32 {
+        u32::from_be_bytes(self.fwd(4).try_into().unwrap())
+    }
+
+    fn next64(&mut self) -> u64 {
+        u64::from_be_bytes(self.fwd(8).try_into().unwrap())
+    }
 }
 
 macro_rules! BIN {
@@ -83,48 +136,19 @@ macro_rules! UNO {
 impl VM {
     pub fn new() -> Self {
         Self {
-            chunk: Vec::new(),
+            frames: Vec::new(),
             heap: Vec::new(),
             stack: Vec::with_capacity(32),
             globals: HashMap::new(),
-            pc: 0,
             timer: Instant::now(),
         }
     }
 
-    fn next_op(&mut self) -> OpCode {
-        let v = self.next();
-        if v >= OpCode::SENTIAL as u8 {
-            panic!("Corrupted VM");
-        }
-        unsafe { transmute(v) }
-    }
-
-    fn next(&mut self) -> u8 {
-        if self.pc >= self.chunk.len() {
-            return OpCode::RETURN as u8;
-        }
-        let v = self.chunk[self.pc];
-        self.pc += 1;
-        v
-    }
-
-    fn fwd(&mut self, step: usize) -> &[u8] {
-        let beg = self.pc;
-        self.pc += step;
-        &self.chunk[beg..self.pc]
-    }
-
-    fn next16(&mut self) -> u16 {
-        u16::from_be_bytes(self.fwd(2).try_into().unwrap())
-    }
-
-    fn next32(&mut self) -> u32 {
-        u32::from_be_bytes(self.fwd(4).try_into().unwrap())
-    }
-
-    fn next64(&mut self) -> u64 {
-        u64::from_be_bytes(self.fwd(8).try_into().unwrap())
+    pub fn reg(&mut self, c: &Compiler) {
+        self.frames.push(Frame {
+            chunk: &c.chunk,
+            pc: 0,
+        })
     }
 
     pub fn push_value(&mut self, v: Val) {
@@ -157,24 +181,29 @@ impl VM {
 
     pub fn run(&mut self) -> Option<&Val> {
         loop {
-            let op = self.next_op();
+            let op = self.frames.last_mut()?.next_op();
             print!("{:?}\t", op);
             match op {
-                OpCode::RETURN => return self.pop_value(),
+                OpCode::RETURN => {
+                    if self.frames.is_empty() {
+                        return self.pop_value();
+                    }
+                    self.frames.pop();
+                }
                 OpCode::PUSH => {
-                    let no = self.next64();
+                    let no = self.frames.last_mut()?.next64();
                     self.stack.push(no);
                 }
                 OpCode::POP => {
                     self.stack.pop();
                 }
                 OpCode::JUMP => {
-                    self.pc = self.next16() as usize;
+                    //self.pc = self.next16() as usize;
                 }
                 OpCode::JUMPIF => {
-                    let goto = self.next16() as usize;
+                    let goto = self.frames.last_mut()?.next16() as usize;
                     if self.pop_value() == Some(&Val::Bool(true)) {
-                        self.pc = goto;
+                        //self.pc = goto;
                     }
                 }
                 OpCode::ADD => BIN!(self, +),
@@ -200,12 +229,17 @@ impl VM {
                 OpCode::GRES => {
                     let ptr = self.pop()? as usize;
                     let g_var = self.heap.get(ptr)?; // Not using `pop_value` to bypass borrow checker
-                    if let Val::Var(v) = g_var {
-                        let val = self.globals.get(v).copied()? as usize;
-                        print!("Got #{}# {}! \t", val, self.heap.get(val)?);
-                        self.push(val);
-                    } else {
-                        panic!("Unaccessible!")
+                    match g_var {
+                        Val::Var(v) => {
+                            let val = self.globals.get(v).copied()? as usize;
+                            print!("Got #{}# {}! \t", val, self.heap.get(val)?);
+                            self.push(val);
+                        }
+                        Val::Fun(n, a, b) => {
+                            let sub = Frame::fun(b);
+                            self.frames.push(sub);
+                        }
+                        _ => panic!("Unaccessible!"),
                     }
                 }
                 OpCode::LOCAL => todo!(),
@@ -214,12 +248,12 @@ impl VM {
                     let lhs = self.pop()? as usize;
                     match self.heap.get(lhs)? {
                         Val::Var(n) => self.globals.insert(Rc::clone(n), rhs as u64),
-                        a => None,
+                        _ => None,
                     };
                 }
                 OpCode::SENTIAL => panic!("Corrupted!"),
             }
-            println!("- {:?}", self.stack);
+            println!("- {:?} {:?}", self.stack, self.heap);
         }
     }
 }

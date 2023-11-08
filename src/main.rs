@@ -109,11 +109,12 @@ impl Options {
 
 fn s(vm: &mut VM, c: &mut Compiler) {
     swap(&mut c.heap, &mut vm.heap);
-    swap(&mut c.chunk, &mut vm.chunk);
+    //swap(&mut c.chunk, &mut vm.chunk);
 }
 fn main() {
     let mut compiler = Compiler::new();
     let mut vm = VM::new();
+    vm.reg(&compiler);
     /* let mut repl = Repl::new();*/
     let (flags, files) = env::args().skip(1).partition(|a| a.starts_with("-"));
     let options = Options::from(&flags, &files);

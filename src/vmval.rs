@@ -1,4 +1,5 @@
 use std::{
+    cell::OnceCell,
     fmt,
     ops::{Add, Div, Mul, Not, Sub},
     rc::Rc,
@@ -10,13 +11,13 @@ pub enum VmVal {
     Num(f64),
     Bool(bool),
     Var(Rc<str>),
-    Fun(Rc<str>, Vec<u8>),
+    Fun(Rc<str>, u8, Vec<u8>),
     Nil,
 }
 impl VmVal {
     pub fn extract_str(&self) -> Option<Rc<str>> {
         match self {
-            VmVal::Str(s) | VmVal::Var(s) | VmVal::Fun(s, _) => Some(Rc::clone(s)),
+            VmVal::Str(s) | VmVal::Var(s) | VmVal::Fun(s, _, _) => Some(Rc::clone(s)),
             _ => None,
         }
     }
@@ -26,7 +27,7 @@ impl fmt::Display for VmVal {
         match &self {
             VmVal::Str(s) => write!(f, "\"{}\"", s),
             VmVal::Var(n) => write!(f, "<var {}>", n),
-            VmVal::Fun(n, _) => write!(f, "<fun {}>", n),
+            VmVal::Fun(n, _, _) => write!(f, "<fun {}>", n),
             VmVal::Bool(b) => write!(f, "{}", b),
             VmVal::Num(n) => write!(f, "{}", n),
             VmVal::Nil => write!(f, "nil"),

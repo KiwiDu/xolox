@@ -1,5 +1,5 @@
 use std::{
-    cell::Cell,
+    cell::{Cell, OnceCell},
     collections::{HashSet, VecDeque},
     mem::transmute,
     rc::Rc,
@@ -20,6 +20,7 @@ pub struct Compiler {
     pub heap: Vec<Val>,
     pub strings: HashSet<Rc<str>>,
     locals: Vec<(u32, Rc<str>)>,
+    heap_offset: usize,
 }
 impl Compiler {
     pub fn emit_value(&mut self, v: Val) {
@@ -37,6 +38,11 @@ impl Compiler {
         self.emit_value(Val::Str(s))
     }
 
+    fn decl_fun(&mut self, name: &str, arity: u8, chunk: Vec<u8>) {
+        let name = self.intern(name);
+        self.malloc(Val::Fun(name, arity, chunk));
+    }
+
     pub fn emit(&mut self, ptr: u64) {
         self.chunk.reserve(1 + 8);
         self.chunk.push(OpCode::PUSH as u8);
@@ -49,13 +55,13 @@ impl Compiler {
             for (i, h) in self.heap.iter().enumerate() {
                 if let Some(hs) = h.extract_str() {
                     if hs == s {
-                        return i;
+                        return i + self.heap_offset;
                     }
                 }
             }
         }
         self.heap.push(v);
-        self.heap.len() - 1
+        self.heap.len() - 1 + self.heap_offset
     }
 }
 impl Compiler {
@@ -66,6 +72,7 @@ impl Compiler {
             heap: Vec::with_capacity(32),
             strings: HashSet::new(),
             locals: Vec::with_capacity(32),
+            heap_offset: 0,
         }
     }
 
@@ -90,6 +97,7 @@ impl Compiler {
     fn op(&mut self, c: OpCode) {
         self.chunk.push(c as u8);
     }
+
     fn name(t: &S<Token>) -> Rc<str> {
         match t {
             S::Atom(Token::Idt(s)) => &s[..],
@@ -98,6 +106,7 @@ impl Compiler {
         }
         .into()
     }
+
     fn atom(&mut self, t: &Token, set: bool) {
         if set {
             match t {
@@ -109,7 +118,6 @@ impl Compiler {
                 Token::Idt(s) => {
                     for (d, l) in self.locals.iter().rev() {
                         if s.as_str() == l.as_ref() {
-                            //self.
                             return;
                         }
                     }
@@ -215,7 +223,24 @@ impl Compiler {
                 }
                 self.depth -= 1;
             }
-            Token::Idt(_) => todo!(),
+            fun @ Token::Idt(_) => {
+                for arg in t.iter().rev() {
+                    self.compile(arg, false);
+                }
+                self.atom(fun, set);
+            }
+            Token::Kwd(Keywords::Fun) => {
+                if let [S::Atom(Token::Idt(name)), args @ .., body] = t.as_slice() {
+                    let mut fun_compiler = Compiler::new();
+                    fun_compiler.heap_offset = self.heap.len() + 1;
+                    fun_compiler.compile(body, false);
+                    let mut fun_chunk = fun_compiler.chunk;
+                    fun_chunk.shrink_to_fit();
+                    let arity = args.len() as u8;
+                    self.decl_fun(name, arity, fun_chunk);
+                    self.heap.extend(fun_compiler.heap);
+                }
+            }
             Token::Kwd(_) => todo!(),
             _ => panic!("Unsupported cons `{}`", h),
         }
