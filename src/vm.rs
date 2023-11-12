@@ -1,10 +1,4 @@
-use std::{
-    collections::HashMap,
-    mem::{replace, swap, transmute},
-    ptr::slice_from_raw_parts,
-    rc::Rc,
-    time::Instant,
-};
+use std::{collections::HashMap, mem::transmute, rc::Rc, time::Instant};
 
 use crate::{compile::Compiler, vmval::VmVal as Val};
 
@@ -16,10 +10,12 @@ pub enum OpCode {
     POP,
     JUMP,
     JUMPIF,
+    CALL,
     //Var and Fun
-    GDEF,
-    GRES,
-    LOCAL,
+    GSET,
+    GGET,
+    LSET,
+    LGET,
     ASSIGN,
 
     //Native value
@@ -39,6 +35,10 @@ pub enum OpCode {
     MUL,
     DIV,
     NOT,
+
+    GT,
+    LT,
+    EQ,
 
     //Sential
     SENTIAL,
@@ -72,11 +72,16 @@ pub struct VM {
 struct Frame {
     chunk: *const Vec<u8>,
     pc: usize,
+    arity: usize,
 }
 
 impl Frame {
-    fn fun(chunk: &Vec<u8>) -> Self {
-        Self { chunk, pc: 0 }
+    fn fun(chunk: &Vec<u8>, arity: usize) -> Self {
+        Self {
+            chunk,
+            pc: 0,
+            arity,
+        }
     }
     fn next(&mut self) -> u8 {
         let chunk = unsafe { self.chunk.as_ref() }.unwrap();
@@ -107,12 +112,16 @@ impl Frame {
         u16::from_be_bytes(self.fwd(2).try_into().unwrap())
     }
 
-    fn next32(&mut self) -> u32 {
+    /* fn next32(&mut self) -> u32 {
         u32::from_be_bytes(self.fwd(4).try_into().unwrap())
-    }
+    } */
 
     fn next64(&mut self) -> u64 {
         u64::from_be_bytes(self.fwd(8).try_into().unwrap())
+    }
+
+    fn jmp(&mut self) {
+        self.pc = self.next16() as usize;
     }
 }
 
@@ -122,6 +131,15 @@ macro_rules! BIN {
         let a = &$self.heap[$self.stack.pop()? as usize];
         //println!("a:{}, b:{}",a,b);
         $self.push_value(a $opc b);
+    }};
+}
+
+macro_rules! CMP {
+    ($self:ident, $opc:tt) => {{
+        let b = &$self.heap[$self.stack.pop()? as usize];
+        let a = &$self.heap[$self.stack.pop()? as usize];
+        //println!("a:{}, b:{}",a,b);
+        $self.push_value(Val::Bool(a $opc b));
     }};
 }
 
@@ -148,7 +166,12 @@ impl VM {
         self.frames.push(Frame {
             chunk: &c.chunk,
             pc: 0,
+            arity: 0,
         })
+    }
+
+    fn top(&mut self) -> Option<&mut Frame> {
+        self.frames.last_mut()
     }
 
     pub fn push_value(&mut self, v: Val) {
@@ -165,6 +188,10 @@ impl VM {
         self.stack.pop()
     }
 
+    fn peek(&mut self, d: usize) -> Option<u64> {
+        self.stack.iter().nth_back(d).copied()
+    }
+
     fn push(&mut self, ptr: usize) {
         self.stack.push(ptr as u64)
     }
@@ -175,20 +202,35 @@ impl VM {
     }
 
     pub fn peek_value(&mut self, d: usize) -> Option<&Val> {
-        let ptr = self.stack.iter().nth_back(d)?;
-        self.heap.get(*ptr as usize)
+        let ptr = self.peek(d)?;
+        self.heap.get(ptr as usize)
     }
 
-    pub fn run(&mut self) -> Option<&Val> {
+    pub fn run(&mut self, verbose: bool) -> Option<&Val> {
         loop {
-            let op = self.frames.last_mut()?.next_op();
-            print!("{:?}\t", op);
+            let top = self.top()?;
+            let i = top.pc;
+            let op = top.next_op();
+            if verbose {
+                print!("{:2} {:?}\t", i, op);
+            }
             match op {
                 OpCode::RETURN => {
-                    if self.frames.is_empty() {
+                    if self.frames.len() == 1 {
                         return self.pop_value();
                     }
-                    self.frames.pop();
+                    let top = self.frames.pop()?.arity;
+                    if self.stack.is_empty() {
+                        if top != 0 {
+                            return None;
+                        }
+                    } else {
+                        let end = self.stack.len() - 1;
+                        self.stack.swap(end, end - top);
+                        for _ in 0..top {
+                            self.pop();
+                        }
+                    }
                 }
                 OpCode::PUSH => {
                     let no = self.frames.last_mut()?.next64();
@@ -198,26 +240,33 @@ impl VM {
                     self.stack.pop();
                 }
                 OpCode::JUMP => {
-                    //self.pc = self.next16() as usize;
+                    self.top()?.jmp();
                 }
                 OpCode::JUMPIF => {
-                    let goto = self.frames.last_mut()?.next16() as usize;
                     if self.pop_value() == Some(&Val::Bool(true)) {
-                        //self.pc = goto;
+                        self.top()?.jmp();
+                        //print!("JUMPPED!")
+                    } else {
+                        self.top()?.next16(); //Consume the unused addr.
+                                              //print!("NO JUMP!")
                     }
+                    //println!("{}", self.top()?.pc)
                 }
                 OpCode::ADD => BIN!(self, +),
                 OpCode::SUB => BIN!(self, -),
                 OpCode::MUL => BIN!(self, *),
                 OpCode::DIV => BIN!(self, /),
+                OpCode::GT => CMP!(self, >),
+                OpCode::LT => CMP!(self, <),
+                OpCode::EQ => CMP!(self, ==),
                 OpCode::NOT => UNO!(self, !),
                 OpCode::TIME => self.push_value(Val::Num(self.timer.elapsed().as_secs_f64())),
-                OpCode::PRINT => println!("{}", self.pop_value().unwrap_or(&Val::Nil)),
+                OpCode::PRINT => println!(">> {}", self.pop_value().unwrap_or(&Val::Nil)),
                 OpCode::TRUE => self.push_value(Val::Bool(true)),
                 OpCode::FALSE => self.push_value(Val::Bool(false)),
                 OpCode::NIL => self.push_value(Val::Nil),
                 OpCode::ZERO => self.push_value(Val::Num(0.0)),
-                OpCode::GDEF => {
+                OpCode::GSET => {
                     let rhs = self.pop()? as usize;
                     let lhs = self.pop()? as usize;
                     if let Val::Var(lhs) = self.heap.get(lhs)? {
@@ -226,23 +275,46 @@ impl VM {
                         panic!("Unassignable!")
                     }
                 }
-                OpCode::GRES => {
+                OpCode::GGET => {
                     let ptr = self.pop()? as usize;
                     let g_var = self.heap.get(ptr)?; // Not using `pop_value` to bypass borrow checker
                     match g_var {
                         Val::Var(v) => {
                             let val = self.globals.get(v).copied()? as usize;
-                            print!("Got #{}# {}! \t", val, self.heap.get(val)?);
+                            if verbose {
+                                print!("Got #{}: {} \t", val, self.heap.get(val)?);
+                            }
                             self.push(val);
                         }
+                        /* Val::Fun(n, a, b) => {
+                            let sub = Frame::fun(b, *a as usize);
+                            self.frames.push(sub);
+                        } */
+                        _ => panic!("Unaccessible!"),
+                    }
+                }
+                OpCode::CALL => {
+                    let ptr = self.pop()? as usize;
+                    let fun = self.heap.get(ptr)?;
+                    match fun {
                         Val::Fun(n, a, b) => {
-                            let sub = Frame::fun(b);
+                            let sub = Frame::fun(b, *a as usize);
                             self.frames.push(sub);
                         }
                         _ => panic!("Unaccessible!"),
                     }
                 }
-                OpCode::LOCAL => todo!(),
+                OpCode::LSET => {
+                    let local = self.top()?.next16() as usize;
+                    let rhs = self.peek(0)?;
+                    let lhs: &mut u64 = self.stack.iter_mut().nth_back(local)?;
+                    *lhs = rhs
+                }
+                OpCode::LGET => {
+                    let local = self.top()?.next16() as usize;
+                    let ptr = self.peek(local)?;
+                    self.push(ptr as usize);
+                }
                 OpCode::ASSIGN => {
                     let rhs = self.pop()? as usize;
                     let lhs = self.pop()? as usize;
@@ -253,7 +325,23 @@ impl VM {
                 }
                 OpCode::SENTIAL => panic!("Corrupted!"),
             }
-            println!("- {:?} {:?}", self.stack, self.heap);
+            if verbose {
+                //println!("- {:?} {:?}", self.stack, self.heap);
+
+                println!(
+                    "- [{}] \n\t  [{}]",
+                    self.stack
+                        .iter()
+                        .map(|v| v.to_string())
+                        .reduce(|s, v| format!("{}, {}", s, v))
+                        .unwrap_or("".to_string()),
+                    self.heap
+                        .iter()
+                        .map(|v| v.to_string())
+                        .reduce(|s, v| format!("{}, {}", s, v))
+                        .unwrap_or("".to_string()),
+                );
+            }
         }
     }
 }

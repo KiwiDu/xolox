@@ -1,5 +1,8 @@
-fun six(){
-    print 6;
+fun add_six(x){
+    return x+6;
 }
-
-six()
+if (true) {
+    print add_six(2);
+} else {
+    print 3;
+}

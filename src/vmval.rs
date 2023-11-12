@@ -5,7 +5,7 @@ use std::{
     rc::Rc,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum VmVal {
     Str(Rc<str>),
     Num(f64),
@@ -19,6 +19,23 @@ impl VmVal {
         match self {
             VmVal::Str(s) | VmVal::Var(s) | VmVal::Fun(s, _, _) => Some(Rc::clone(s)),
             _ => None,
+        }
+    }
+}
+impl fmt::Debug for VmVal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Str(arg0) => f.debug_tuple("Str").field(arg0).finish(),
+            Self::Num(arg0) => f.debug_tuple("Num").field(arg0).finish(),
+            Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
+            Self::Var(arg0) => f.debug_tuple("Var").field(arg0).finish(),
+            Self::Fun(arg0, arg1, arg2) => f
+                .debug_tuple("Fun")
+                .field(arg0)
+                .field(arg1)
+                //.field(arg2)
+                .finish(),
+            Self::Nil => write!(f, "Nil"),
         }
     }
 }

@@ -82,6 +82,7 @@ where
     }
 }
 
+#[derive(Debug)]
 struct Options {
     verbose: bool,
     repl: bool,
@@ -95,7 +96,7 @@ impl Options {
             repl: files.is_empty(), // repl turned on by default if no file is supplied.
             state: false,
         };
-        for f in flags.iter().flat_map(|f| f.chars().next()) {
+        for f in flags.iter().flat_map(|f| f[1..].chars()) {
             match f {
                 'v' => options.verbose = true,
                 'r' => options.repl = true,
@@ -118,24 +119,38 @@ fn main() {
     /* let mut repl = Repl::new();*/
     let (flags, files) = env::args().skip(1).partition(|a| a.starts_with("-"));
     let options = Options::from(&flags, &files);
+    println!("{:?}\n", options);
     for path in files.iter() {
         file_loop(&options, path, |parser: &mut Parser, opt: &Options| {
             while let Ok(a) = &parser.parse_stmt() {
                 println!("{}", a);
                 compiler.compile(a, false);
             }
-            println!();
+            compiler.op(xolox::vm::OpCode::RETURN);
+
+            println!("\n\t@main");
             compiler.dasm();
             println!();
             s(&mut vm, &mut compiler);
-            let output = vm.run().unwrap_or(&Val::Nil);
+            let output = vm.run(opt.verbose).unwrap_or(&Val::Nil);
             let output = format!("{}", output);
             println!(
                 "{:?}\n\
-                \tHeap  = {:?}\n\
-                \tStack = {:?}\n\
+                \tHeap  = [{}]\n\
+                \tStack = [{}]\n\
                 \tGlobal= {:?}",
-                output, vm.heap, vm.stack, vm.globals
+                output,
+                vm.heap
+                    .iter()
+                    .map(|v| v.to_string())
+                    .reduce(|s, v| format!("{}, {}", s, v))
+                    .unwrap_or("".to_string()),
+                vm.stack
+                    .iter()
+                    .map(|v| v.to_string())
+                    .reduce(|s, v| format!("{}, {}", s, v))
+                    .unwrap_or("".to_string()),
+                vm.globals
             );
 
             s(&mut vm, &mut compiler);
@@ -146,7 +161,7 @@ fn main() {
     stdin_loop(&options, |parser: &mut Parser, opt: &Options| {
         compiler.compile(&parser.parse_stmt().ok().unwrap(), false);
         s(&mut vm, &mut compiler);
-        let output = vm.run().unwrap_or(&Val::Nil);
+        let output = vm.run(opt.verbose).unwrap_or(&Val::Nil);
         let output = format!("{}", output);
         println!(
             "{:?}\n\
