@@ -132,7 +132,12 @@ impl Lexer<'_> {
                 ';' => Op(Semicolon),
                 '/' => {
                     if let Some('/') = self.stack.peek() {
-                        break; // Cannot acomplish this via the `expect_or`
+                        while let Some(c) = self.stack.next() {
+                            if c == '\n' {
+                                break;
+                            }
+                        }
+                        continue;
                     } else {
                         Op(Slash)
                     }

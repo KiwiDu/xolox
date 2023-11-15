@@ -5,4 +5,4 @@ fun fac(n){
     return n * fac(n-1);
 }
 
-print fac(30);
+print fac(4);

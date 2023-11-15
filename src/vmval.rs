@@ -1,11 +1,11 @@
 use std::{
-    cell::OnceCell,
+    //cell::OnceCell,
     fmt,
     ops::{Add, Div, Mul, Not, Sub},
     rc::Rc,
 };
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub enum VmVal {
     Str(Rc<str>),
     Num(f64),
@@ -29,7 +29,7 @@ impl fmt::Debug for VmVal {
             Self::Num(arg0) => f.debug_tuple("Num").field(arg0).finish(),
             Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
             Self::Var(arg0) => f.debug_tuple("Var").field(arg0).finish(),
-            Self::Fun(arg0, arg1, arg2) => f
+            Self::Fun(arg0, arg1, _arg2) => f
                 .debug_tuple("Fun")
                 .field(arg0)
                 .field(arg1)
@@ -135,4 +135,17 @@ impl PartialOrd for &VmVal {
     }
 }
 
-impl Eq for VmVal {}
+impl PartialEq for &VmVal {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (VmVal::Str(l0), VmVal::Str(r0)) => l0 == r0,
+            (VmVal::Num(l0), VmVal::Num(r0)) => l0 == r0,
+            (VmVal::Bool(l0), VmVal::Bool(r0)) => l0 == r0,
+            (VmVal::Var(l0), VmVal::Var(r0)) => l0 == r0,
+            (VmVal::Fun(l0, _, _), VmVal::Fun(r0, _, _)) => l0 == r0,
+            _ => core::mem::discriminant(*self) == core::mem::discriminant(*other),
+        }
+    }
+}
+
+impl Eq for &VmVal {}

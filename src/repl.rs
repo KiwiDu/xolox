@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::zip, rc::Rc, time::Instant};
+use std::{collections::HashMap, iter::zip, time::Instant};
 
 use crate::{
     error::Error,

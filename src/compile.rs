@@ -5,17 +5,13 @@ use std::{
 };
 
 use crate::{
+    ftbit::{StackType, StackVal},
     sexpr::S,
     token::{Keywords, Token, TokenType},
     vm::OpCode,
     //value::Val,
     vmval::VmVal as Val,
 };
-
-/* struct Heap<'a> {
-    v: Vec<&'a Val>,
-    s: HashSet<Val>,
-} */
 
 #[derive(Debug)]
 pub struct Compiler {
@@ -28,7 +24,7 @@ pub struct Compiler {
 }
 impl Compiler {
     pub fn emit_value(&mut self, v: Val) {
-        let ptr = self.alloc(v) as u64;
+        let ptr = self.alloc(v).to_raw();
         self.emit(ptr);
     }
 
@@ -42,10 +38,10 @@ impl Compiler {
         self.emit_value(Val::Str(s))
     }
 
-    fn decl_fun(&mut self, name: &str, arity: u8, chunk: Vec<u8>) {
+    /* fn decl_fun(&mut self, name: &str, arity: u8, chunk: Vec<u8>) {
         let name = self.intern(name);
         self.alloc(Val::Fun(name, arity, chunk));
-    }
+    } */
     fn emit_fun(&mut self, name: &str, arity: u8, chunk: Vec<u8>) {
         let name = self.intern(name);
         self.emit_value(Val::Fun(name, arity, chunk));
@@ -58,15 +54,23 @@ impl Compiler {
         self.chunk.extend(bytes)
     }
 
-    pub fn alloc(&mut self, v: Val) -> usize {
-        if let Some(s) = v.extract_str() {
-            for (i, h) in self.heap.iter().enumerate() {
-                //if let Some(hs) = h.extract_str() {
-                if h == &v {
-                    //if hs == s {
-                    return i; //+ self.heap_offset;
-                }
-                //}
+    pub fn alloc(&mut self, v: Val) -> StackVal {
+        match v {
+            Val::Num(f) => StackVal::from_f64(f),
+            Val::Bool(true) => StackVal::TRUE,
+            Val::Bool(false) => StackVal::FALSE,
+            Val::Nil => StackVal::NIL,
+            _ => {
+                let addr = self.alloc_obj(v) as u64;
+                StackVal::from_parts(StackType::HeapPtr, addr)
+            }
+        }
+    }
+
+    fn alloc_obj(&mut self, v: Val) -> usize {
+        for (i, h) in self.heap.iter().enumerate() {
+            if h == &v {
+                return i;
             }
         }
         self.heap.push(v);
@@ -74,11 +78,11 @@ impl Compiler {
     }
 }
 impl Compiler {
-    pub fn new() -> Self {
+    pub fn new(heap_size: usize) -> Self {
         Self {
             depth: 0,
             chunk: Vec::with_capacity(32),
-            heap: Vec::with_capacity(32),
+            heap: Vec::with_capacity(heap_size),
             strings: HashSet::new(),
             locals: Vec::with_capacity(32),
             heap_offset: 0,
@@ -134,7 +138,7 @@ impl Compiler {
     }
 
     fn resolve_local(&self, local: &str) -> Option<usize> {
-        for (i, (d, l)) in self.locals.iter().rev().enumerate() {
+        for (i, (_d, l)) in self.locals.iter().enumerate() {
             if local == l.as_ref() {
                 return Some(i);
             }
@@ -244,14 +248,14 @@ impl Compiler {
         fn global_assign(c: &mut Compiler, left: &S<Token>, right: &S<Token>) {
             c.compile(left, true);
             c.compile(right, false);
-            c.op(OpCode::ASSIGN);
+            c.op(OpCode::GSET);
         }
         fn local_define(c: &mut Compiler, d: u32, left: &S<Token>, right: &S<Token>) {
             c.compile(right, false);
             let l = c.intern(Compiler::name(left));
             c.locals.push((d, l));
         }
-        fn local_assign(c: &mut Compiler, d: u32, left: &S<Token>, right: &S<Token>) {
+        fn local_assign(c: &mut Compiler, _d: u32, left: &S<Token>, right: &S<Token>) {
             match c.resolve_local(Compiler::name(left)) {
                 Some(i) => {
                     c.compile(right, false);
@@ -274,7 +278,7 @@ impl Compiler {
                 0 => {
                     self.compile(left, true);
                     self.compile(right, false);
-                    self.op(OpCode::ASSIGN);
+                    self.op(OpCode::GSET);
                 }
                 d => local_assign(self, d, left, right),
             },
@@ -294,24 +298,33 @@ impl Compiler {
                 for a in t {
                     self.compile(a, set);
                 }
-                let num_local = self.locals.iter().filter(|(d, a)| *d == self.depth).count();
+                let num_local = self
+                    .locals
+                    .iter()
+                    .filter(|(d, _a)| *d == self.depth)
+                    .count();
                 for _ in 0..num_local {
                     self.op(OpCode::POP);
                 }
                 self.depth -= 1;
             }
-            fun @ Token::Idt(_) => {
-                for arg in t.iter().rev() {
-                    self.compile(arg, false);
+            fun @ Token::Idt(name) => match (name.as_str(), t.len()) {
+                ("clock", 0) => {
+                    self.op(OpCode::TIME);
                 }
-                self.atom(fun, set);
-                self.op(OpCode::CALL);
-            }
+                _ => {
+                    for arg in t.iter().rev() {
+                        self.compile(arg, false);
+                    }
+                    self.atom(fun, set);
+                    self.op(OpCode::CALL);
+                }
+            },
             Token::Kwd(Keywords::Fun) => {
                 if let [S::Atom(fun @ Token::Idt(name)), args @ .., body] = t.as_slice() {
                     println!("\t@{}", name);
 
-                    let mut fun_compiler = Compiler::new();
+                    let mut fun_compiler = Compiler::new(32);
                     //Forking
                     //println!("{:?}", self.heap);
                     swap(&mut self.heap, &mut fun_compiler.heap);
@@ -399,7 +412,6 @@ impl Compiler {
                             OpCode::POP => vec![8],
                             OpCode::JUMP => vec![2],
                             OpCode::JUMPIF => vec![2],
-                            OpCode::ASSIGN => vec![8],
                             OpCode::LGET => vec![2],
                             OpCode::LSET => vec![2],
                             _ => {

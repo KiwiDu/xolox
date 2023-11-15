@@ -1,7 +1,7 @@
 use std::env;
 use std::fmt::Display;
 use std::mem::swap;
-use std::thread;
+
 use xolox::compile::Compiler;
 use xolox::vm::VM;
 use xolox::vmval::VmVal as Val;
@@ -10,7 +10,7 @@ use xolox::{
     from_file,
     from_stdin,
     parse::Parser,
-    repl::Repl,
+    //repl::Repl,
     //value::Val
 };
 /*
@@ -109,15 +109,16 @@ impl Options {
 }
 
 fn s(vm: &mut VM, c: &mut Compiler) {
-    swap(&mut c.heap, &mut vm.heap);
+    swap(&mut c.heap, &mut vm.mem.heap);
     //swap(&mut c.chunk, &mut vm.chunk);
 }
 fn main() {
-    let mut compiler = Compiler::new();
+    let mut compiler = Compiler::new(128);
     let mut vm = VM::new();
     vm.reg(&compiler);
     /* let mut repl = Repl::new();*/
     let (flags, files) = env::args().skip(1).partition(|a| a.starts_with("-"));
+    //let files = vec!["fib.lox".to_owned()];
     let options = Options::from(&flags, &files);
     println!("{:?}\n", options);
     for path in files.iter() {
@@ -132,26 +133,30 @@ fn main() {
             compiler.dasm();
             println!();
             s(&mut vm, &mut compiler);
-            let output = vm.run(opt.verbose).unwrap_or(&Val::Nil);
+            let output = vm.run(opt.verbose).unwrap_or(Val::Nil);
             let output = format!("{}", output);
-            println!(
+            /* println!(
                 "{:?}\n\
-                \tHeap  = [{}]\n\
                 \tStack = [{}]\n\
-                \tGlobal= {:?}",
+                \tGlobal= {{{}}}\n\
+                \tHeap  = \n\t{}",
                 output,
+                vm.stack
+                    .iter()
+                    .map(|v| vm.heap.get(*v as usize).unwrap().to_string())
+                    .reduce(|s, v| format!("{}, {}", s, v))
+                    .unwrap_or("".to_string()),
+                vm.globals
+                    .iter()
+                    .map(|(k, v)| format!("{}:{}", k, vm.heap.get(*v as usize).unwrap()))
+                    .reduce(|s, v| format!("{}, {}", s, v))
+                    .unwrap_or("".to_string()),
                 vm.heap
                     .iter()
                     .map(|v| v.to_string())
                     .reduce(|s, v| format!("{}, {}", s, v))
                     .unwrap_or("".to_string()),
-                vm.stack
-                    .iter()
-                    .map(|v| v.to_string())
-                    .reduce(|s, v| format!("{}, {}", s, v))
-                    .unwrap_or("".to_string()),
-                vm.globals
-            );
+            ); */
 
             s(&mut vm, &mut compiler);
             Ok(output)
@@ -161,15 +166,15 @@ fn main() {
     stdin_loop(&options, |parser: &mut Parser, opt: &Options| {
         compiler.compile(&parser.parse_stmt().ok().unwrap(), false);
         s(&mut vm, &mut compiler);
-        let output = vm.run(opt.verbose).unwrap_or(&Val::Nil);
+        let output = vm.run(opt.verbose).unwrap_or(Val::Nil);
         let output = format!("{}", output);
-        println!(
+        /* println!(
             "{:?}\n\
             \tHeap  = {:?}\n\
             \tStack = {:?}\n\
             \tGlobal= {:?}",
             output, vm.heap, vm.stack, vm.globals
-        );
+        ); */
 
         s(&mut vm, &mut compiler);
         Ok(output)
