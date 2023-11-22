@@ -59,7 +59,6 @@ pub fn from_file(path: &str) -> Option<TokenStack> {
 
 pub mod compile;
 pub mod error;
-pub mod ftbit;
 pub mod lexer;
 pub mod parse;
 pub mod repl;
@@ -67,4 +66,3 @@ pub mod sexpr;
 pub mod token;
 pub mod value;
 pub mod vm;
-pub mod vmval;

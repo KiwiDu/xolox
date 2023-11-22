@@ -1,0 +1,12 @@
+fun counter(){
+    var n = 0;
+    fun f(){
+        n = n + 1;
+        return n;
+    }
+    return f;
+}
+
+var c = counter();
+print c();
+print c();

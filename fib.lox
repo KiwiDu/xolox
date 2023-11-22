@@ -7,6 +7,6 @@ fun fib(n){
 
 var s = clock();
 
-print fib(10);
+print fib(40);
 
 print clock() - s;

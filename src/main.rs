@@ -3,8 +3,8 @@ use std::fmt::Display;
 use std::mem::swap;
 
 use xolox::compile::Compiler;
+use xolox::vm::vmval::VmVal as Val;
 use xolox::vm::VM;
-use xolox::vmval::VmVal as Val;
 use xolox::{
     error::Error,
     from_file,
@@ -115,7 +115,7 @@ fn s(vm: &mut VM, c: &mut Compiler) {
 fn main() {
     let mut compiler = Compiler::new(128);
     let mut vm = VM::new();
-    vm.reg(&compiler);
+
     /* let mut repl = Repl::new();*/
     let (flags, files) = env::args().skip(1).partition(|a| a.starts_with("-"));
     //let files = vec!["fib.lox".to_owned()];
@@ -127,11 +127,12 @@ fn main() {
                 println!("{}", a);
                 compiler.compile(a, false);
             }
-            compiler.op(xolox::vm::OpCode::RETURN);
+            compiler.op_return();
 
             println!("\n\t@main");
             compiler.dasm();
             println!();
+            vm.reg(&compiler);
             s(&mut vm, &mut compiler);
             let output = vm.run(opt.verbose).unwrap_or(Val::Nil);
             let output = format!("{}", output);

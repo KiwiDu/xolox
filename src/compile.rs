@@ -4,25 +4,33 @@ use std::{
     rc::Rc,
 };
 
-use crate::{
+use crate::vm::{
     ftbit::{StackType, StackVal},
+    rcstr::RcStr,
+    vmval::VmVal,
+};
+use crate::{
     sexpr::S,
     token::{Keywords, Token, TokenType},
-    vm::OpCode,
+    vm::basic::OpCode,
     //value::Val,
-    vmval::VmVal as Val,
 };
+type Str = Rc<str>; //RcStr<DefaultHasher>;
+type Val = VmVal<Str>;
 
 #[derive(Debug)]
 pub struct Compiler {
     pub chunk: Vec<u8>,
     depth: u32,
     pub heap: Vec<Val>,
-    pub strings: HashSet<Rc<str>>,
-    locals: Vec<(u32, Rc<str>)>,
+    pub strings: HashSet<Str>,
+    locals: Vec<(u32, Str)>,
     heap_offset: usize,
 }
 impl Compiler {
+    pub fn op_return(&mut self) {
+        self.op(OpCode::RETURN)
+    }
     pub fn emit_value(&mut self, v: Val) {
         let ptr = self.alloc(v).to_raw();
         self.emit(ptr);
@@ -98,9 +106,9 @@ impl Compiler {
         }
     }
 
-    fn intern(&mut self, s: &str) -> Rc<str> {
+    fn intern(&mut self, s: &str) -> Str {
         if let Some(a) = self.strings.get(s) {
-            Rc::clone(a)
+            a.clone()
         } else {
             self.strings.insert(s.into());
             self.intern(s)
@@ -109,6 +117,10 @@ impl Compiler {
 
     pub fn op(&mut self, c: OpCode) {
         self.chunk.push(c as u8);
+    }
+
+    pub fn ops<const N: usize>(&mut self, cs: [OpCode; N]) {
+        self.chunk.extend(cs.iter().map(|&c| c as u8));
     }
 
     fn push16(&mut self, d: u16) {
@@ -139,7 +151,8 @@ impl Compiler {
 
     fn resolve_local(&self, local: &str) -> Option<usize> {
         for (i, (_d, l)) in self.locals.iter().enumerate() {
-            if local == l.as_ref() {
+            if l.as_ref() == local {
+                println!("\n\t{local}:{i}");
                 return Some(i);
             }
         }
@@ -201,7 +214,6 @@ impl Compiler {
                 Semicolon => {
                     self.compile(t, set);
                     self.op(OpCode::POP);
-                    //self.op(OpCode::NIL);
                 }
                 _ => panic!("Unexpected unary operator: {}!", tt),
             }
@@ -223,20 +235,11 @@ impl Compiler {
                 Star => c.op(OpCode::MUL),
                 Slash => c.op(OpCode::DIV),
                 EqualEqual => c.op(OpCode::EQ),
-                BangEqual => {
-                    c.op(OpCode::EQ);
-                    c.op(OpCode::NOT);
-                }
+                BangEqual => c.ops([OpCode::EQ, OpCode::NOT]),
                 Less => c.op(OpCode::LT),
-                LessEqual => {
-                    c.op(OpCode::GT);
-                    c.op(OpCode::NOT);
-                }
+                LessEqual => c.ops([OpCode::GT, OpCode::NOT]),
                 Greater => c.op(OpCode::GT),
-                GreaterEqual => {
-                    c.op(OpCode::LT);
-                    c.op(OpCode::NOT);
-                }
+                GreaterEqual => c.ops([OpCode::LT, OpCode::NOT]),
                 _ => panic!("Unexpected binary operator: {}!", op),
             }
         }
@@ -260,7 +263,7 @@ impl Compiler {
                 Some(i) => {
                     c.compile(right, false);
                     c.op(OpCode::LSET);
-                    c.push16((i + 1) as u16);
+                    c.push16(i as u16);
                 }
                 None => global_assign(c, left, right),
             }
@@ -324,41 +327,36 @@ impl Compiler {
                 if let [S::Atom(fun @ Token::Idt(name)), args @ .., body] = t.as_slice() {
                     println!("\t@{}", name);
 
-                    let mut fun_compiler = Compiler::new(32);
+                    let mut forked = Compiler::new(32);
                     //Forking
                     //println!("{:?}", self.heap);
-                    swap(&mut self.heap, &mut fun_compiler.heap);
+                    swap(&mut self.heap, &mut forked.heap);
                     //fun_compiler.heap_offset = self.heap.len() + 1;
-                    fun_compiler.depth = self.depth + 1;
-                    fun_compiler
+                    forked.depth = self.depth + 1;
+                    forked
                         .locals
-                        .extend(args.iter().enumerate().map(|(i, s)| {
-                            if let S::Atom(Token::Idt(n)) = s {
-                                (i as u32, self.intern(n))
-                            } else {
-                                panic!("Invalid args list")
-                            }
-                        }));
+                        .extend(self.locals.iter().map(|(d, n)| (*d, Rc::clone(n))));
+                    forked.locals.extend(args.iter().enumerate().map(|(i, s)| {
+                        if let S::Atom(Token::Idt(n)) = s {
+                            (i as u32, self.intern(n))
+                        } else {
+                            panic!("Invalid args list")
+                        }
+                    }));
 
-                    fun_compiler.compile(body, false);
-                    fun_compiler.op(OpCode::NIL);
-                    fun_compiler.op(OpCode::RETURN);
+                    forked.compile(body, false);
+                    forked.ops([OpCode::NIL, OpCode::RETURN]);
 
-                    fun_compiler.dasm();
+                    forked.dasm();
 
-                    let mut fun_chunk = fun_compiler.chunk;
+                    let mut fun_chunk = forked.chunk;
                     fun_chunk.shrink_to_fit();
                     let arity = args.len() as u8;
 
-                    //self.heap.extend(fun_compiler.heap);
-                    swap(&mut self.heap, &mut fun_compiler.heap);
+                    swap(&mut self.heap, &mut forked.heap);
                     self.atom(fun, true);
                     self.emit_fun(name, arity, fun_chunk);
-
                     self.op(OpCode::GSET);
-
-                    //println!("{:?}", self.heap);
-                    //self.
                 } else {
                     panic!("Invalid fnction!");
                 }
@@ -409,7 +407,7 @@ impl Compiler {
                         print!("{:2} {:?} ", i, op);
                         mode.extend(match op {
                             OpCode::PUSH => vec![8],
-                            OpCode::POP => vec![8],
+                            //OpCode::POP => vec![8],
                             OpCode::JUMP => vec![2],
                             OpCode::JUMPIF => vec![2],
                             OpCode::LGET => vec![2],

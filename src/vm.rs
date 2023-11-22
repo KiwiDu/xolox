@@ -1,206 +1,28 @@
-use std::{collections::HashMap, mem::transmute, rc::Rc, time::Instant};
+pub mod basic;
+pub mod frame;
+pub mod ftbit;
+pub mod rcstr;
+pub mod vmval;
 
-use crate::{
-    compile::Compiler,
-    ftbit::{StackType, StackVal, Unpack},
-    vmval::VmVal as Val,
-};
+use std::{collections::HashMap, rc::Rc, time::Instant};
 
-#[derive(Debug, Clone, Copy)]
-pub enum OpCode {
-    //Basics
-    RETURN,
-    PUSH,
-    POP,
-    JUMP,
-    JUMPIF,
-    CALL,
-    //Var and Fun
-    GSET,
-    GGET,
-    LSET,
-    LGET,
+use crate::compile::Compiler;
+use basic::OpCode;
+use frame::Frame;
+use ftbit::{StackType, StackVal, Unpack};
+use rcstr::RcStr;
+use vmval::VmVal;
 
-    //Native value
-    TRUE,
-    FALSE,
-    NIL,
-    //Frequent value
-    ZERO,
-
-    // Native func
-    TIME,
-    PRINT,
-
-    // Ops
-    ADD,
-    SUB,
-    MUL,
-    DIV,
-    NOT,
-
-    GT,
-    LT,
-    EQ,
-
-    //Sential
-    SENTIAL,
-}
+use self::basic::Mem;
+//type Str = RcStr<DefaultHasher>;
+type Str = Rc<str>;
+type Val = VmVal<Str>;
 
 pub struct VM {
     pub mem: Mem,
-    pub globals: HashMap<Rc<str>, StackVal>,
+    pub globals: HashMap<Str, StackVal>,
     frames: Vec<Frame>,
     timer: Instant,
-}
-pub struct Mem {
-    pub stack: Vec<StackVal>,
-    pub heap: Vec<Val>,
-}
-
-impl Mem {
-    pub fn new() -> Self {
-        Self {
-            heap: Vec::new(),
-            stack: Vec::with_capacity(32),
-        }
-    }
-
-    pub fn push_val(&mut self, v: Val) {
-        let ptr = self.alloc(v);
-        self.push(ptr)
-    }
-
-    pub fn alloc(&mut self, v: Val) -> StackVal {
-        match v {
-            Val::Num(f) => StackVal::from_f64(f),
-            Val::Bool(true) => StackVal::TRUE,
-            Val::Bool(false) => StackVal::FALSE,
-            Val::Nil => StackVal::NIL,
-            _ => {
-                let addr = self.alloc_obj(v) as u64;
-                StackVal::from_parts(StackType::HeapPtr, addr)
-            }
-        }
-    }
-
-    fn alloc_obj(&mut self, v: Val) -> usize {
-        for (i, h) in self.heap.iter().enumerate() {
-            if h == &v {
-                return i;
-            }
-        }
-        self.heap.push(v);
-        self.heap.len() - 1
-    }
-
-    fn pop(&mut self) -> Option<StackVal> {
-        self.stack.pop()
-    }
-
-    fn peek(&mut self, d: usize) -> Option<StackVal> {
-        self.stack.iter().nth_back(d).copied()
-    }
-
-    fn push(&mut self, ptr: StackVal) {
-        self.stack.push(ptr)
-    }
-
-    fn push_bool(&mut self, b: bool) {
-        match b {
-            true => self.stack.push(StackVal::TRUE),
-            false => self.stack.push(StackVal::FALSE),
-        }
-    }
-
-    pub fn pop_pri(&mut self) -> Option<Val> {
-        match self.pop()?.unpack() {
-            Unpack::Float(f) => Some(Val::Num(f)),
-            Unpack::NaNBox(StackType::Nil, _) => Some(Val::Nil),
-            Unpack::NaNBox(StackType::True, _) => Some(Val::Bool(true)),
-            Unpack::NaNBox(StackType::False, _) => Some(Val::Bool(false)),
-            _ => None,
-        }
-    }
-
-    pub fn pop_obj(&mut self) -> Option<&Val> {
-        //println!("{:?}", self.peek(0)?.unpack());
-        match self.pop()?.unpack() {
-            Unpack::NaNBox(StackType::HeapPtr, ptr) => self.heap.get(ptr as usize),
-            _ => None,
-        }
-    }
-
-    pub fn pop_val(&mut self) -> Option<Val> {
-        match self.pop()?.unpack() {
-            Unpack::Float(f) => Some(Val::Num(f)),
-            Unpack::NaNBox(StackType::Nil, _) => Some(Val::Nil),
-            Unpack::NaNBox(StackType::True, _) => Some(Val::Bool(true)),
-            Unpack::NaNBox(StackType::False, _) => Some(Val::Bool(false)),
-            Unpack::NaNBox(StackType::HeapPtr, ptr) => self.heap.get(ptr as usize).cloned(),
-            _ => None,
-        }
-    }
-    /*
-
-    pub fn peek_value(&mut self, d: usize) -> Option<&Val> {
-        match self.peek(d)?.unpack() {
-            Unpack::Float(f) => Some(&Val::Num(f)),
-            Unpack::NaNBox(StackType::StackPtr, ptr) => self.heap.get(ptr as usize),
-            _ => None,
-        }
-    } */
-}
-struct Frame {
-    chunk: *const Vec<u8>,
-    pc: usize,
-    offset: usize,
-}
-
-impl Frame {
-    fn fun(chunk: &Vec<u8>, offset: usize) -> Self {
-        Self {
-            chunk,
-            pc: 0,
-            offset,
-        }
-    }
-    fn next(&mut self) -> u8 {
-        let chunk = unsafe { self.chunk.as_ref() }.unwrap();
-        if self.pc >= chunk.len() {
-            return OpCode::RETURN as u8;
-        }
-        let v = chunk[self.pc];
-        self.pc += 1;
-        v
-    }
-
-    fn next_op(&mut self) -> OpCode {
-        let v = self.next();
-        if v >= OpCode::SENTIAL as u8 {
-            panic!("Corrupted VM");
-        }
-        unsafe { transmute(v) }
-    }
-
-    fn fwd(&mut self, step: usize) -> &[u8] {
-        let beg = self.pc;
-        self.pc += step;
-        let chunk = unsafe { self.chunk.as_ref() }.unwrap();
-        &chunk[beg..self.pc]
-    }
-
-    fn next16(&mut self) -> u16 {
-        u16::from_be_bytes(self.fwd(2).try_into().unwrap())
-    }
-
-    fn next64(&mut self) -> u64 {
-        u64::from_be_bytes(self.fwd(8).try_into().unwrap())
-    }
-
-    fn jmp(&mut self) {
-        self.pc = self.next16().try_into().unwrap();
-    }
 }
 
 macro_rules! BIN {
@@ -263,7 +85,7 @@ impl VM {
 
     pub fn reg(&mut self, c: &Compiler) {
         self.frames.push(Frame {
-            chunk: &c.chunk,
+            chunk: c.chunk.as_ptr(),
             pc: 0,
             offset: 0,
         })
@@ -351,7 +173,7 @@ impl VM {
                     let rhs = self.mem.pop()?;
                     let lhs = self.mem.pop_obj()?;
                     if let Val::Var(lhs) = lhs {
-                        self.globals.insert(Rc::clone(&lhs), rhs);
+                        self.globals.insert(Rc::clone(lhs), rhs);
                     } else {
                         panic!("Unaccessible {} !", lhs);
                     }
@@ -367,7 +189,7 @@ impl VM {
                     }
                 }
                 OpCode::CALL => {
-                    let len = self.mem.stack.len();
+                    let len = self.mem.stack.len() - 1; //To compensate for the following pop
                     let fun = self.mem.pop_obj()?;
                     match fun {
                         Val::Fun(_, a, b) => {
@@ -383,6 +205,7 @@ impl VM {
                     let offset = self.top()?.offset;
                     let rhs = self.mem.peek(0)?;
                     let lhs = self.mem.stack[offset..].iter_mut().nth(local)?;
+                    println!("\n{local}:{:?} -> {:?}", lhs.unpack(), rhs.unpack());
                     *lhs = rhs
                 }
                 OpCode::LGET => {
@@ -408,7 +231,6 @@ impl VM {
                 if let OpCode::GSET = op {
                     println!("{:?}", self.globals);
                 }
-
                 println!("\tH:{:?} \n", self.mem.heap,);
             }
         }
