@@ -66,3 +66,4 @@ pub mod sexpr;
 pub mod token;
 pub mod value;
 pub mod vm;
+pub mod tests;

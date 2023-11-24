@@ -6,7 +6,7 @@ use std::{
 
 use crate::vm::{
     ftbit::{StackType, StackVal},
-    rcstr::RcStr,
+    local::Local,
     vmval::VmVal,
 };
 use crate::{
@@ -24,7 +24,7 @@ pub struct Compiler {
     depth: u32,
     pub heap: Vec<Val>,
     pub strings: HashSet<Str>,
-    locals: Vec<(u32, Str)>,
+    locals: Vec<Local<Str>>,
     heap_offset: usize,
 }
 impl Compiler {
@@ -150,8 +150,8 @@ impl Compiler {
     }
 
     fn resolve_local(&self, local: &str) -> Option<usize> {
-        for (i, (_d, l)) in self.locals.iter().enumerate() {
-            if l.as_ref() == local {
+        for (i, l) in self.locals.iter().enumerate() {
+            if l.name.as_ref() == local {
                 println!("\n\t{local}:{i}");
                 return Some(i);
             }
@@ -255,8 +255,8 @@ impl Compiler {
         }
         fn local_define(c: &mut Compiler, d: u32, left: &S<Token>, right: &S<Token>) {
             c.compile(right, false);
-            let l = c.intern(Compiler::name(left));
-            c.locals.push((d, l));
+            let name = c.intern(Compiler::name(left));
+            c.locals.push(Local::new(name, d));
         }
         fn local_assign(c: &mut Compiler, _d: u32, left: &S<Token>, right: &S<Token>) {
             match c.resolve_local(Compiler::name(left)) {
@@ -301,11 +301,7 @@ impl Compiler {
                 for a in t {
                     self.compile(a, set);
                 }
-                let num_local = self
-                    .locals
-                    .iter()
-                    .filter(|(d, _a)| *d == self.depth)
-                    .count();
+                let num_local = self.locals.iter().filter(|l| l.depth == self.depth).count();
                 for _ in 0..num_local {
                     self.op(OpCode::POP);
                 }
@@ -329,16 +325,13 @@ impl Compiler {
 
                     let mut forked = Compiler::new(32);
                     //Forking
-                    //println!("{:?}", self.heap);
                     swap(&mut self.heap, &mut forked.heap);
                     //fun_compiler.heap_offset = self.heap.len() + 1;
                     forked.depth = self.depth + 1;
-                    forked
-                        .locals
-                        .extend(self.locals.iter().map(|(d, n)| (*d, Rc::clone(n))));
+                    forked.locals.extend(self.locals.iter().cloned());
                     forked.locals.extend(args.iter().enumerate().map(|(i, s)| {
                         if let S::Atom(Token::Idt(n)) = s {
-                            (i as u32, self.intern(n))
+                            Local::new(self.intern(n), i as u32)
                         } else {
                             panic!("Invalid args list")
                         }

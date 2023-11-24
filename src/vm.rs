@@ -1,6 +1,7 @@
 pub mod basic;
 pub mod frame;
 pub mod ftbit;
+pub mod local;
 pub mod rcstr;
 pub mod vmval;
 
@@ -10,7 +11,6 @@ use crate::compile::Compiler;
 use basic::OpCode;
 use frame::Frame;
 use ftbit::{StackType, StackVal, Unpack};
-use rcstr::RcStr;
 use vmval::VmVal;
 
 use self::basic::Mem;

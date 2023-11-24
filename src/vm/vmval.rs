@@ -16,7 +16,7 @@ pub enum VmVal<Str: Borrow<str>> {
 impl<T: Borrow<str> + Clone> VmVal<T> {
     pub fn extract_str(&self) -> Option<T> {
         match self {
-            VmVal::Str(s) | VmVal::Var(s) | VmVal::Fun(s, _, _) => Some(s.clone()),
+            VmVal::Str(s) | VmVal::Var(s) | VmVal::Fun(s, _, _) => Some(T::clone(s)),
             _ => None,
         }
     }
